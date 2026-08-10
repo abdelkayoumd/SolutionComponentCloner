@@ -31,11 +31,37 @@ dotnet build SolutionComponentCloner.sln -c Release
 
 ## Installing into XrmToolBox
 
-1. Build in `Release` configuration (above).
-2. Copy `SolutionComponentCloner\bin\Release\SolutionComponentCloner.dll` (and the matching
-   `.pdb`) into your XrmToolBox plugins folder, typically:
-   `%AppData%\MscrmTools\XrmToolBox\Plugins\`
-3. Restart XrmToolBox. The tool appears as **Solution Component Cloner**.
+Every build (Debug or Release) automatically copies `SolutionComponentCloner.dll` and its
+`.pdb` into `%AppData%\MscrmTools\XrmToolBox\Plugins\` via an MSBuild post-build target — no
+manual copy step needed. Just build, then (re)start XrmToolBox and the tool appears as
+**Solution Component Cloner**.
+
+If you ever need to do it by hand: copy
+`SolutionComponentCloner\bin\Release\SolutionComponentCloner.dll` (and the matching `.pdb`)
+into that same Plugins folder.
+
+## Debugging (F5 in Visual Studio)
+
+`SolutionComponentCloner.csproj.user` (gitignored, machine-specific) points the debugger at
+a local XrmToolBox install and passes `/plugin:"Solution Component Cloner"` so it jumps
+straight to this tool instead of the tool list. If you clone this repo on a different
+machine, create/edit that file yourself:
+
+```xml
+<Project>
+  <PropertyGroup>
+    <StartAction>Program</StartAction>
+    <StartProgram>C:\path\to\your\XrmToolBox.exe</StartProgram>
+    <StartArguments>/plugin:"Solution Component Cloner"</StartArguments>
+    <StartWorkingDirectory>C:\path\to\your\XrmToolBox</StartWorkingDirectory>
+  </PropertyGroup>
+</Project>
+```
+
+Set a breakpoint, hit F5, connect to an org, and step through as normal. Make sure your
+local XrmToolBox's `XrmToolBox.Extensibility.dll` version matches the `XrmToolBoxPackage`
+version in the `.csproj` — a mismatch there is the most common source of confusing runtime
+errors when debugging a plugin.
 
 ## Project layout
 

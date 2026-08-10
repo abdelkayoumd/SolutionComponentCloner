@@ -24,4 +24,21 @@
     <PackageReference Include="MscrmTools.Xrm.Connection" Version="1.2025.9.64" />
   </ItemGroup>
 
+  <!--
+    Deploys the built plugin straight into the local XrmToolBox install after every build,
+    so relaunching XrmToolBox (or hitting F5 with the debug launch settings in
+    SolutionComponentCloner.csproj.user) always picks up the latest code.
+  -->
+  <Target Name="DeployToXrmToolBox" AfterTargets="Build" Condition="'$(OS)' == 'Windows_NT' AND '$(APPDATA)' != ''">
+    <PropertyGroup>
+      <XrmToolBoxPluginsDir>$(APPDATA)\MscrmTools\XrmToolBox\Plugins\</XrmToolBoxPluginsDir>
+    </PropertyGroup>
+    <ItemGroup>
+      <XrmToolBoxDeployFiles Include="$(TargetDir)$(TargetName).dll" />
+      <XrmToolBoxDeployFiles Include="$(TargetDir)$(TargetName).pdb" Condition="Exists('$(TargetDir)$(TargetName).pdb')" />
+    </ItemGroup>
+    <MakeDir Directories="$(XrmToolBoxPluginsDir)" Condition="!Exists('$(XrmToolBoxPluginsDir)')" />
+    <Copy SourceFiles="@(XrmToolBoxDeployFiles)" DestinationFolder="$(XrmToolBoxPluginsDir)" SkipUnchangedFiles="false" />
+  </Target>
+
 </Project>
