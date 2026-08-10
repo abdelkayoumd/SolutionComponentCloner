@@ -57,6 +57,11 @@ namespace SolutionComponentCloner.Services
             { 70, new ComponentTypeDefinition("SDK Message Processing Step", "sdkmessageprocessingstep", "name") },
             { 71, new ComponentTypeDefinition("SDK Message Processing Step Image", "sdkmessageprocessingstepimage", "name") },
             { 72, new ComponentTypeDefinition("Service Endpoint", "serviceendpoint", "name") },
+            // A whole Model-Driven App. Its AppModuleComponents list every entity/form/view/
+            // process the app is built from — copying this component always brings all of
+            // those along, since they're the app's own definition, not optional dependencies
+            // AddRequiredComponents can skip.
+            { 80, new ComponentTypeDefinition("Model-Driven App", "appmodule", "name") },
             { 92, new ComponentTypeDefinition("SLA", "sla", "name") },
             { 150, new ComponentTypeDefinition("Mobile Offline Profile", "mobileofflineprofile", "name") },
             { 152, new ComponentTypeDefinition("Similarity Rule", "similarityrule", "name") },
