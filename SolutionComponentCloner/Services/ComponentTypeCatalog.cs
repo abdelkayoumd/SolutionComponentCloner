@@ -30,6 +30,7 @@ namespace SolutionComponentCloner.Services
         public const int OptionSet = 9;
         public const int EntityKey = 14;
         public const int Form = 60;
+        public const int ModelDrivenApp = 80;
 
         public static readonly Dictionary<int, ComponentTypeDefinition> Definitions = new Dictionary<int, ComponentTypeDefinition>
         {
@@ -61,7 +62,7 @@ namespace SolutionComponentCloner.Services
             // process the app is built from — copying this component always brings all of
             // those along, since they're the app's own definition, not optional dependencies
             // AddRequiredComponents can skip.
-            { 80, new ComponentTypeDefinition("Model-Driven App", "appmodule", "name") },
+            { ModelDrivenApp, new ComponentTypeDefinition("Model-Driven App", "appmodule", "name") },
             { 92, new ComponentTypeDefinition("SLA", "sla", "name") },
             { 150, new ComponentTypeDefinition("Mobile Offline Profile", "mobileofflineprofile", "name") },
             { 152, new ComponentTypeDefinition("Similarity Rule", "similarityrule", "name") },

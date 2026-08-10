@@ -16,8 +16,8 @@ namespace SolutionComponentCloner.UI
         private readonly DataverseSolutionService _dataService = new DataverseSolutionService();
         private BindingList<SolutionComponentItem> _components = new BindingList<SolutionComponentItem>();
 
-        private ComboBox _cmbSource;
-        private ComboBox _cmbTarget;
+        private SolutionPickerControl _cmbSource;
+        private SolutionPickerControl _cmbTarget;
         private Button _btnSelectAll;
         private Button _btnSelectNone;
         private Button _btnCopy;
@@ -158,12 +158,12 @@ namespace SolutionComponentCloner.UI
             panel.Controls.Add(arrow, 1, 0);
             panel.Controls.Add(targetGroup, 2, 0);
 
-            _cmbSource.SelectedIndexChanged += (s, e) => LoadSourceComponentsAsync();
+            _cmbSource.SelectionChanged += (s, e) => LoadSourceComponentsAsync();
 
             return panel;
         }
 
-        private Control BuildSolutionPicker(string label, out ComboBox combo)
+        private Control BuildSolutionPicker(string label, out SolutionPickerControl picker)
         {
             var stack = new TableLayoutPanel
             {
@@ -181,20 +181,11 @@ namespace SolutionComponentCloner.UI
                 Margin = new Padding(2, 0, 0, 4)
             }, 0, 0);
 
-            // Editable + AutoComplete turns this into a type-to-search box (matches solutions by
-            // name as you type) while keeping selection on the framework's own, well-tested
-            // SelectedItem/SelectedIndexChanged plumbing instead of hand-rolled Items juggling.
-            combo = new ComboBox
-            {
-                Dock = DockStyle.Top,
-                DropDownStyle = ComboBoxStyle.DropDown,
-                AutoCompleteMode = AutoCompleteMode.Suggest,
-                AutoCompleteSource = AutoCompleteSource.ListItems,
-                Font = Theme.FontRegular,
-                FlatStyle = FlatStyle.Flat,
-                Height = 26
-            };
-            stack.Controls.Add(combo, 0, 1);
+            // A filter box above a plain ListView of matches — same composition as XrmToolBox's
+            // own MsCrmTools.SolutionComponentsMover uses for its solution picker. Filtering and
+            // selecting are two separate, decoupled controls, so neither one can fight the other.
+            picker = new SolutionPickerControl();
+            stack.Controls.Add(picker.Control, 0, 1);
             return stack;
         }
 
@@ -314,6 +305,8 @@ namespace SolutionComponentCloner.UI
                 }
             };
 
+            _grid.CellPainting += (s, e) => PaintComponentCell(e, colName.Index);
+
             body.Controls.Add(_grid);
             body.Controls.Add(_lblComponentCount);
             return group;
@@ -426,6 +419,42 @@ namespace SolutionComponentCloner.UI
             return button;
         }
 
+        /// <summary>
+        /// Model-Driven App rows get a red inline warning appended after the component name,
+        /// since copying one always pulls in every entity/form/process the app references —
+        /// AddRequiredComponents can't be unchecked to avoid that (see ComponentTypeCatalog).
+        /// </summary>
+        private void PaintComponentCell(DataGridViewCellPaintingEventArgs e, int nameColumnIndex)
+        {
+            if (e.RowIndex < 0 || e.ColumnIndex != nameColumnIndex)
+            {
+                return;
+            }
+
+            if (!(_grid.Rows[e.RowIndex].DataBoundItem is SolutionComponentItem item) ||
+                item.ComponentType != ComponentTypeCatalog.ModelDrivenApp)
+            {
+                return;
+            }
+
+            e.PaintBackground(e.CellBounds, true);
+
+            var font = e.CellStyle.Font;
+            var nameText = item.DisplayName ?? string.Empty;
+            const string warningText = "  ⚠ copying this adds every entity/form/process the app is built from";
+
+            var nameSize = TextRenderer.MeasureText(e.Graphics, nameText, font, e.CellBounds.Size, TextFormatFlags.NoPadding);
+            var nameRect = new Rectangle(e.CellBounds.X + 2, e.CellBounds.Y, nameSize.Width, e.CellBounds.Height);
+            TextRenderer.DrawText(e.Graphics, nameText, font, nameRect, e.CellStyle.ForeColor,
+                TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.NoPadding);
+
+            var warnRect = new Rectangle(nameRect.Right, e.CellBounds.Y, Math.Max(0, e.CellBounds.Right - nameRect.Right), e.CellBounds.Height);
+            TextRenderer.DrawText(e.Graphics, warningText, font, warnRect, Theme.Danger,
+                TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
+
+            e.Handled = true;
+        }
+
         #endregion
 
         #region Data loading
@@ -448,32 +477,15 @@ namespace SolutionComponentCloner.UI
                     }
 
                     var solutions = (System.Collections.Generic.List<SolutionListItem>)args.Result;
-                    BindSolutionCombo(_cmbSource, solutions);
-                    BindSolutionCombo(_cmbTarget, solutions);
+                    _cmbSource.SetSolutions(solutions);
+                    _cmbTarget.SetSolutions(solutions);
                 }
             });
         }
 
-        private static void BindSolutionCombo(ComboBox combo, System.Collections.Generic.List<SolutionListItem> solutions)
-        {
-            var previousSelection = (combo.SelectedItem as SolutionListItem)?.SolutionId;
-
-            combo.DataSource = solutions.ToList();
-            combo.Text = string.Empty;
-
-            if (previousSelection.HasValue)
-            {
-                var match = solutions.FirstOrDefault(s => s.SolutionId == previousSelection.Value);
-                if (match != null)
-                {
-                    combo.SelectedItem = match;
-                }
-            }
-        }
-
         private void LoadSourceComponentsAsync()
         {
-            var source = _cmbSource.SelectedItem as SolutionListItem;
+            var source = _cmbSource.SelectedSolution;
             if (source == null || Service == null)
             {
                 return;
@@ -524,8 +536,8 @@ namespace SolutionComponentCloner.UI
 
         private void BtnCopy_Click(object sender, EventArgs e)
         {
-            var target = _cmbTarget.SelectedItem as SolutionListItem;
-            var source = _cmbSource.SelectedItem as SolutionListItem;
+            var target = _cmbTarget.SelectedSolution;
+            var source = _cmbSource.SelectedSolution;
             var selected = _components.Where(c => c.Selected).ToList();
 
             if (source == null || target == null)
