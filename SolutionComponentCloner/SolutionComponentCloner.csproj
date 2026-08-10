@@ -38,7 +38,12 @@
       <XrmToolBoxDeployFiles Include="$(TargetDir)$(TargetName).pdb" Condition="Exists('$(TargetDir)$(TargetName).pdb')" />
     </ItemGroup>
     <MakeDir Directories="$(XrmToolBoxPluginsDir)" Condition="!Exists('$(XrmToolBoxPluginsDir)')" />
-    <Copy SourceFiles="@(XrmToolBoxDeployFiles)" DestinationFolder="$(XrmToolBoxPluginsDir)" SkipUnchangedFiles="false" />
+    <!--
+      Retries="1" plus ContinueOnError so that having XrmToolBox open (which locks the DLL)
+      turns into a warning telling you to restart it, instead of failing the whole build.
+    -->
+    <Copy SourceFiles="@(XrmToolBoxDeployFiles)" DestinationFolder="$(XrmToolBoxPluginsDir)" SkipUnchangedFiles="false"
+          Retries="1" RetryDelayMilliseconds="300" ContinueOnError="WarnAndContinue" />
   </Target>
 
 </Project>
