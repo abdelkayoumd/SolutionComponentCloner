@@ -202,13 +202,20 @@ namespace SolutionComponentCloner.Services
                     ComponentId = component.ObjectId,
                     ComponentType = component.ComponentType,
                     SolutionUniqueName = targetSolutionUniqueName,
-                    AddRequiredComponents = addRequiredComponents,
-                    // DoNotIncludeSubcomponents is a separate switch from AddRequiredComponents: it controls
-                    // whether THIS component's own children (e.g. an entity's attributes/forms/views) come
-                    // along for the ride. Tie it to the same toggle so "unchecked" really means "just this
-                    // component, nothing else" instead of still pulling in subcomponents.
-                    DoNotIncludeSubcomponents = !addRequiredComponents
+                    AddRequiredComponents = addRequiredComponents
                 };
+
+                // DoNotIncludeSubcomponents is a separate switch from AddRequiredComponents: it
+                // controls whether THIS component's own children (e.g. an entity's attributes,
+                // forms, views) come along for the ride. Dataverse only accepts it for Entity-
+                // rooted components — passing it for any other type (a view, an app setting,
+                // etc.) throws "DoNotIncludeSubcomponents can not be set to true on non Entity
+                // root ...". So only tie it to the checkbox when the component actually is an
+                // Entity; every other type is a leaf and AddRequiredComponents alone governs it.
+                if (component.ComponentType == ComponentTypeCatalog.Entity)
+                {
+                    request.DoNotIncludeSubcomponents = !addRequiredComponents;
+                }
 
                 service.Execute(request);
 
