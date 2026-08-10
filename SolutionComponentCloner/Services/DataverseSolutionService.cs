@@ -11,6 +11,7 @@ namespace SolutionComponentCloner.Services
     internal sealed class DataverseSolutionService
     {
         private readonly MetadataNameCache _metadataCache = new MetadataNameCache();
+        private readonly DynamicComponentTypeCache _dynamicTypeCache = new DynamicComponentTypeCache();
 
         public List<SolutionListItem> GetSolutions(IOrganizationService service)
         {
@@ -60,7 +61,10 @@ namespace SolutionComponentCloner.Services
 
             foreach (var row in rows)
             {
-                row.ComponentTypeName = ComponentTypeCatalog.GetTypeName(row.ComponentType);
+                if (string.IsNullOrEmpty(row.ComponentTypeName))
+                {
+                    row.ComponentTypeName = ComponentTypeCatalog.GetTypeName(row.ComponentType);
+                }
                 if (string.IsNullOrEmpty(row.DisplayName))
                 {
                     row.DisplayName = row.ObjectId.ToString();
@@ -75,26 +79,65 @@ namespace SolutionComponentCloner.Services
 
         private void ResolveDisplayNames(IOrganizationService service, int componentType, List<SolutionComponentItem> items)
         {
-            if (!ComponentTypeCatalog.Definitions.TryGetValue(componentType, out var definition))
-            {
-                return;
-            }
-
             try
             {
-                if (definition.IsMetadataBacked)
+                if (ComponentTypeCatalog.Definitions.TryGetValue(componentType, out var definition))
                 {
-                    ResolveMetadataBackedNames(service, componentType, items);
+                    if (definition.IsMetadataBacked)
+                    {
+                        ResolveMetadataBackedNames(service, componentType, items);
+                    }
+                    else
+                    {
+                        var primaryKey = ComponentTypeCatalog.GetPrimaryKeyAttribute(definition);
+                        ResolveTableBackedNames(service, definition.EntityLogicalName, primaryKey, definition.NameAttribute, items);
+                    }
                 }
                 else
                 {
-                    ResolveTableBackedNames(service, definition, items);
+                    // Not one of our hand-picked types (e.g. a custom/ISV-registered component
+                    // type, like the high numeric values managed solutions register). Discover
+                    // it generically via solutioncomponentdefinition + entity metadata instead of
+                    // just showing "Component Type N".
+                    ResolveDynamicComponentNames(service, componentType, items);
                 }
             }
             catch (Exception)
             {
-                // Leave DisplayName unset for this group; caller falls back to the raw id.
+                // Leave DisplayName/ComponentTypeName unset for this group; caller falls back to
+                // the raw id / component type number.
             }
+        }
+
+        private void ResolveDynamicComponentNames(IOrganizationService service, int componentType, List<SolutionComponentItem> items)
+        {
+            var definition = _dynamicTypeCache.GetDefinition(service, componentType);
+            if (definition == null)
+            {
+                return;
+            }
+
+            if (!string.IsNullOrEmpty(definition.Value.Name))
+            {
+                foreach (var item in items)
+                {
+                    item.ComponentTypeName = definition.Value.Name;
+                }
+            }
+
+            var primaryEntityName = definition.Value.PrimaryEntityName;
+            if (string.IsNullOrEmpty(primaryEntityName))
+            {
+                return;
+            }
+
+            var entityMetadata = _metadataCache.GetEntityMetadataByLogicalName(service, primaryEntityName);
+            if (entityMetadata?.PrimaryIdAttribute == null || entityMetadata.PrimaryNameAttribute == null)
+            {
+                return;
+            }
+
+            ResolveTableBackedNames(service, primaryEntityName, entityMetadata.PrimaryIdAttribute, entityMetadata.PrimaryNameAttribute, items);
         }
 
         private void ResolveMetadataBackedNames(IOrganizationService service, int componentType, List<SolutionComponentItem> items)
@@ -122,25 +165,23 @@ namespace SolutionComponentCloner.Services
             }
         }
 
-        private static void ResolveTableBackedNames(IOrganizationService service, ComponentTypeDefinition definition, List<SolutionComponentItem> items)
+        private static void ResolveTableBackedNames(IOrganizationService service, string entityLogicalName, string primaryKey, string nameAttribute, List<SolutionComponentItem> items)
         {
-            var primaryKey = ComponentTypeCatalog.GetPrimaryKeyAttribute(definition);
-
             const int batchSize = 500;
             for (var offset = 0; offset < items.Count; offset += batchSize)
             {
                 var batch = items.Skip(offset).Take(batchSize).ToList();
                 var ids = batch.Select(i => (object)i.ObjectId).ToArray();
 
-                var query = new QueryExpression(definition.EntityLogicalName)
+                var query = new QueryExpression(entityLogicalName)
                 {
-                    ColumnSet = new ColumnSet(primaryKey, definition.NameAttribute),
+                    ColumnSet = new ColumnSet(primaryKey, nameAttribute),
                     Criteria = new FilterExpression()
                 };
                 query.Criteria.AddCondition(primaryKey, ConditionOperator.In, ids);
 
                 var lookup = service.RetrieveMultiple(query).Entities
-                    .ToDictionary(e => e.Id, e => e.GetAttributeValue<string>(definition.NameAttribute));
+                    .ToDictionary(e => e.Id, e => e.GetAttributeValue<string>(nameAttribute));
 
                 foreach (var item in batch)
                 {
@@ -162,7 +203,11 @@ namespace SolutionComponentCloner.Services
                     ComponentType = component.ComponentType,
                     SolutionUniqueName = targetSolutionUniqueName,
                     AddRequiredComponents = addRequiredComponents,
-                    DoNotIncludeSubcomponents = false
+                    // DoNotIncludeSubcomponents is a separate switch from AddRequiredComponents: it controls
+                    // whether THIS component's own children (e.g. an entity's attributes/forms/views) come
+                    // along for the ride. Tie it to the same toggle so "unchecked" really means "just this
+                    // component, nothing else" instead of still pulling in subcomponents.
+                    DoNotIncludeSubcomponents = !addRequiredComponents
                 };
 
                 service.Execute(request);

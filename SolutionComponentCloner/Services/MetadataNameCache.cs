@@ -19,6 +19,7 @@ namespace SolutionComponentCloner.Services
         private readonly Dictionary<Guid, string> _relationships = new Dictionary<Guid, string>();
         private readonly Dictionary<Guid, string> _keys = new Dictionary<Guid, string>();
         private readonly Dictionary<Guid, string> _optionSets = new Dictionary<Guid, string>();
+        private readonly Dictionary<string, EntityMetadata> _entitiesByLogicalName = new Dictionary<string, EntityMetadata>(StringComparer.OrdinalIgnoreCase);
         private bool _entityMetadataLoaded;
         private bool _optionSetMetadataLoaded;
 
@@ -26,6 +27,22 @@ namespace SolutionComponentCloner.Services
         {
             EnsureEntityMetadata(service);
             return _entities.TryGetValue(metadataId, out var name) ? name : null;
+        }
+
+        /// <summary>
+        /// Looks up an entity's metadata (primary id/name attributes, etc.) by logical name,
+        /// e.g. to resolve instance names for a custom/ISV component type that isn't in
+        /// <see cref="ComponentTypeCatalog"/>.
+        /// </summary>
+        public EntityMetadata GetEntityMetadataByLogicalName(IOrganizationService service, string logicalName)
+        {
+            if (string.IsNullOrEmpty(logicalName))
+            {
+                return null;
+            }
+
+            EnsureEntityMetadata(service);
+            return _entitiesByLogicalName.TryGetValue(logicalName, out var metadata) ? metadata : null;
         }
 
         public string GetAttributeName(IOrganizationService service, Guid metadataId)
@@ -72,6 +89,11 @@ namespace SolutionComponentCloner.Services
                 if (entity.MetadataId.HasValue)
                 {
                     _entities[entity.MetadataId.Value] = FormatLabel(entity.DisplayName, entity.LogicalName);
+                }
+
+                if (!string.IsNullOrEmpty(entity.LogicalName))
+                {
+                    _entitiesByLogicalName[entity.LogicalName] = entity;
                 }
 
                 if (entity.Attributes != null)

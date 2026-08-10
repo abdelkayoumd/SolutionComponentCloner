@@ -16,8 +16,8 @@ namespace SolutionComponentCloner.UI
         private readonly DataverseSolutionService _dataService = new DataverseSolutionService();
         private BindingList<SolutionComponentItem> _components = new BindingList<SolutionComponentItem>();
 
-        private ComboBox _cmbSource;
-        private ComboBox _cmbTarget;
+        private SearchableSolutionCombo _cmbSource;
+        private SearchableSolutionCombo _cmbTarget;
         private Button _btnSelectAll;
         private Button _btnSelectNone;
         private Button _btnCopy;
@@ -158,12 +158,12 @@ namespace SolutionComponentCloner.UI
             panel.Controls.Add(arrow, 1, 0);
             panel.Controls.Add(targetGroup, 2, 0);
 
-            _cmbSource.SelectedIndexChanged += (s, e) => LoadSourceComponentsAsync();
+            _cmbSource.SelectionChanged += (s, e) => LoadSourceComponentsAsync();
 
             return panel;
         }
 
-        private Control BuildSolutionPicker(string label, out ComboBox combo)
+        private Control BuildSolutionPicker(string label, out SearchableSolutionCombo combo)
         {
             var stack = new TableLayoutPanel
             {
@@ -181,15 +181,8 @@ namespace SolutionComponentCloner.UI
                 Margin = new Padding(2, 0, 0, 4)
             }, 0, 0);
 
-            combo = new ComboBox
-            {
-                Dock = DockStyle.Top,
-                DropDownStyle = ComboBoxStyle.DropDownList,
-                Font = Theme.FontRegular,
-                FlatStyle = FlatStyle.Flat,
-                Height = 26
-            };
-            stack.Controls.Add(combo, 0, 1);
+            combo = new SearchableSolutionCombo();
+            stack.Controls.Add(combo.Control, 0, 1);
             return stack;
         }
 
@@ -443,30 +436,15 @@ namespace SolutionComponentCloner.UI
                     }
 
                     var solutions = (System.Collections.Generic.List<SolutionListItem>)args.Result;
-                    BindSolutionCombo(_cmbSource, solutions);
-                    BindSolutionCombo(_cmbTarget, solutions);
+                    _cmbSource.SetSolutions(solutions);
+                    _cmbTarget.SetSolutions(solutions);
                 }
             });
         }
 
-        private static void BindSolutionCombo(ComboBox combo, System.Collections.Generic.List<SolutionListItem> solutions)
-        {
-            var previousSelection = (combo.SelectedItem as SolutionListItem)?.SolutionId;
-            combo.DataSource = solutions.ToList();
-
-            if (previousSelection.HasValue)
-            {
-                var match = solutions.FirstOrDefault(s => s.SolutionId == previousSelection.Value);
-                if (match != null)
-                {
-                    combo.SelectedItem = match;
-                }
-            }
-        }
-
         private void LoadSourceComponentsAsync()
         {
-            var source = _cmbSource.SelectedItem as SolutionListItem;
+            var source = _cmbSource.SelectedSolution;
             if (source == null || Service == null)
             {
                 return;
@@ -517,8 +495,8 @@ namespace SolutionComponentCloner.UI
 
         private void BtnCopy_Click(object sender, EventArgs e)
         {
-            var target = _cmbTarget.SelectedItem as SolutionListItem;
-            var source = _cmbSource.SelectedItem as SolutionListItem;
+            var target = _cmbTarget.SelectedSolution;
+            var source = _cmbSource.SelectedSolution;
             var selected = _components.Where(c => c.Selected).ToList();
 
             if (source == null || target == null)
