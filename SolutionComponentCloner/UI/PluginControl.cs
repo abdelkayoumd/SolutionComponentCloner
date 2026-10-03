@@ -393,8 +393,8 @@ namespace SolutionComponentCloner.UI
             {
                 Dock = DockStyle.Top,
                 AutoSize = true,
-                WrapContents = false,
-                Margin = new Padding(0, 0, 0, 6)
+                WrapContents = true,
+                Padding = new Padding(0, 0, 0, 6)
             };
             header.Controls.Add(new Label
             {
@@ -431,6 +431,11 @@ namespace SolutionComponentCloner.UI
             _results.Columns.Add("Type", 160);
             _results.Columns.Add("Result", 90);
             _results.Columns.Add("Details", 300);
+            _results.Resize += (s, e) =>
+            {
+                var used = _results.Columns[0].Width + _results.Columns[1].Width + _results.Columns[2].Width;
+                _results.Columns[3].Width = Math.Max(300, _results.ClientSize.Width - used);
+            };
             return _results;
         }
 
@@ -549,7 +554,8 @@ namespace SolutionComponentCloner.UI
                 BackColor = Theme.Accent,
                 ForeColor = Color.White,
                 AutoSize = true,
-                Padding = new Padding(14, 6, 14, 6),
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Padding = new Padding(12, 1, 12, 1),
                 Margin = new Padding(0, 0, 0, 0),
                 Cursor = Cursors.Hand
             };
@@ -569,7 +575,8 @@ namespace SolutionComponentCloner.UI
                 BackColor = Theme.PanelBackground,
                 ForeColor = Theme.Accent,
                 AutoSize = true,
-                Padding = new Padding(10, 6, 10, 6),
+                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Padding = new Padding(10, 1, 10, 1),
                 Margin = new Padding(0, 0, 6, 0),
                 Cursor = Cursors.Hand
             };
