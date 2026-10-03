@@ -12,25 +12,19 @@
     <Platforms>AnyCPU</Platforms>
   </PropertyGroup>
 
-  <!-- NuGet metadata for the XrmToolBox Tool Library: the "XrmToolBox" tag and the lib/net48/Plugins layout are what it expects. -->
+  <!--
+    Packaging for the XrmToolBox Tool Library uses a hand-written nuspec (the store requires a
+    dependency on the host app "XrmToolBox", which only a nuspec can declare). The package Version
+    must equal the assembly version in Properties/AssemblyInfo.cs (1.0.0 == 1.0.0.0), or users get
+    false "update available" prompts.
+  -->
   <PropertyGroup>
-    <PackageId>SolutionComponentCloner</PackageId>
     <Version>1.0.0</Version>
-    <Authors>abdel</Authors>
-    <Description>Copies components from one Dataverse solution into another, with optional required-component inclusion.</Description>
-    <PackageTags>XrmToolBox</PackageTags>
-    <PackageProjectUrl>https://github.com/abdelkayoumd/SolutionComponentCloner</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/abdelkayoumd/SolutionComponentCloner</RepositoryUrl>
-    <RepositoryType>git</RepositoryType>
-    <PackageReadmeFile>README.md</PackageReadmeFile>
     <IncludeBuildOutput>false</IncludeBuildOutput>
-    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+    <NuspecFile>SolutionComponentCloner.nuspec</NuspecFile>
+    <NuspecBasePath>$(MSBuildProjectDirectory)</NuspecBasePath>
+    <NuspecProperties>version=$(Version);configuration=$(Configuration)</NuspecProperties>
   </PropertyGroup>
-
-  <ItemGroup>
-    <None Include="$(OutputPath)$(AssemblyName).dll" Pack="true" PackagePath="lib/net48/Plugins/" Visible="false" />
-    <None Include="..\README.md" Pack="true" PackagePath="\" Visible="false" />
-  </ItemGroup>
 
   <ItemGroup>
     <Reference Include="System.Windows.Forms" />

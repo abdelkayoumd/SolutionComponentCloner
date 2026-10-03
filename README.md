@@ -39,6 +39,24 @@ dotnet test SolutionComponentCloner.Tests/SolutionComponentCloner.Tests.csproj
 
 The tests use a hand-written fake `IOrganizationService`, so no Dataverse connection is needed.
 
+## Publishing to the XrmToolBox Tool Library
+
+Follows the [official guide](https://www.xrmtoolbox.com/documentation/for-developers/deploy-your-plugin-in-plugins-store/).
+
+1. Bump the version in **both** `Version` in `SolutionComponentCloner.csproj` and
+   `AssemblyVersion`/`AssemblyFileVersion` in `Properties/AssemblyInfo.cs` (they must match, or users
+   get false "update available" prompts), and update `<releaseNotes>` in
+   `SolutionComponentCloner.nuspec`.
+2. `dotnet pack SolutionComponentCloner/SolutionComponentCloner.csproj -c Release -o nupkg`
+   (CI also uploads the package as a build artifact).
+3. Push the `.nupkg` to nuget.org (needs your account and an API key).
+4. Wait for nuget.org to index it, then register the tool at
+   <https://www.xrmtoolbox.com/plugins/new/> using the NuGet package id `SolutionComponentCloner`.
+   An administrator reviews it, which can take several days.
+
+The nuspec must keep the `XrmToolBox` tag, the `XrmToolBox` dependency, the icon and project URLs
+(the repository must be public for those links to resolve), and the DLL under `lib/net48/Plugins/`.
+
 ## Installing into XrmToolBox
 
 Every build (Debug or Release) automatically copies `SolutionComponentCloner.dll` and its

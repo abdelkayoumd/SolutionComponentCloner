@@ -21,6 +21,15 @@ jobs:
       - name: Test
         run: dotnet test SolutionComponentCloner.Tests/SolutionComponentCloner.Tests.csproj
 
+      - name: Pack
+        run: dotnet pack SolutionComponentCloner/SolutionComponentCloner.csproj -c Release --no-build -o nupkg
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: nupkg
+          path: nupkg/*.nupkg
+
       - name: Upload plugin
         uses: actions/upload-artifact@v4
         with:

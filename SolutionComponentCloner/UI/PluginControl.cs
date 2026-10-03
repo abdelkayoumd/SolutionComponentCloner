@@ -714,6 +714,11 @@ namespace SolutionComponentCloner.UI
 
         private void BtnCopy_Click(object sender, EventArgs e)
         {
+            ExecuteMethod(CopySelected);
+        }
+
+        private void CopySelected()
+        {
             var target = _cmbTarget.SelectedSolution;
             var source = _cmbSource.SelectedSolution;
             var selected = _components.Where(c => c.Selected).ToList();
