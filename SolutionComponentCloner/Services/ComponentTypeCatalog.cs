@@ -36,7 +36,6 @@ namespace SolutionComponentCloner.Services
         {
             { Entity, new ComponentTypeDefinition("Entity", null, null) },
             { Attribute, new ComponentTypeDefinition("Attribute", null, null) },
-            { 3, new ComponentTypeDefinition("Relationship", null, null) },
             { OptionSet, new ComponentTypeDefinition("Option Set", null, null) },
             { Relationship, new ComponentTypeDefinition("Entity Relationship", null, null) },
             { EntityKey, new ComponentTypeDefinition("Entity Key", null, null) },

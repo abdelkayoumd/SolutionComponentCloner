@@ -23,9 +23,7 @@ namespace SolutionComponentCloner.Services
             };
             query.Criteria.AddCondition("isvisible", ConditionOperator.Equal, true);
 
-            var result = service.RetrieveMultiple(query);
-
-            return result.Entities
+            return RetrieveAll(service, query)
                 .Select(e => new SolutionListItem
                 {
                     SolutionId = e.Id,
@@ -46,7 +44,7 @@ namespace SolutionComponentCloner.Services
             };
             query.Criteria.AddCondition("solutionid", ConditionOperator.Equal, solutionId);
 
-            var rows = service.RetrieveMultiple(query).Entities
+            var rows = RetrieveAll(service, query)
                 .Select(e => new SolutionComponentItem
                 {
                     ObjectId = e.GetAttributeValue<Guid>("objectid"),
@@ -75,6 +73,28 @@ namespace SolutionComponentCloner.Services
                 .OrderBy(r => r.ComponentTypeName)
                 .ThenBy(r => r.DisplayName)
                 .ToList();
+        }
+
+        private static List<Entity> RetrieveAll(IOrganizationService service, QueryExpression query)
+        {
+            query.PageInfo = new PagingInfo { PageNumber = 1, Count = 5000 };
+
+            var results = new List<Entity>();
+            while (true)
+            {
+                var page = service.RetrieveMultiple(query);
+                results.AddRange(page.Entities);
+
+                if (!page.MoreRecords)
+                {
+                    break;
+                }
+
+                query.PageInfo.PageNumber++;
+                query.PageInfo.PagingCookie = page.PagingCookie;
+            }
+
+            return results;
         }
 
         private void ResolveDisplayNames(IOrganizationService service, int componentType, List<SolutionComponentItem> items)
