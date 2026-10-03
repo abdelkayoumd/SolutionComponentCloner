@@ -1,0 +1,27 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Build
+        run: dotnet build SolutionComponentCloner/SolutionComponentCloner.csproj -c Release
+
+      - name: Upload plugin
+        uses: actions/upload-artifact@v4
+        with:
+          name: SolutionComponentCloner
+          path: |
+            SolutionComponentCloner/bin/Release/SolutionComponentCloner.dll
+            SolutionComponentCloner/bin/Release/SolutionComponentCloner.pdb
