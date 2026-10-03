@@ -31,6 +31,14 @@ Dataverse / Dynamics 365 solution into another.
 dotnet build SolutionComponentCloner/SolutionComponentCloner.csproj -c Release
 ```
 
+## Running the tests
+
+```bash
+dotnet test SolutionComponentCloner.Tests/SolutionComponentCloner.Tests.csproj
+```
+
+The tests use a hand-written fake `IOrganizationService`, so no Dataverse connection is needed.
+
 ## Installing into XrmToolBox
 
 Every build (Debug or Release) automatically copies `SolutionComponentCloner.dll` and its

@@ -1,5 +1,8 @@
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+
+[assembly: InternalsVisibleTo("SolutionComponentCloner.Tests")]
 
 [assembly: AssemblyTitle("Solution Component Cloner")]
 [assembly: AssemblyDescription("Copies solution components from one Dataverse solution to another, with optional required-component inclusion.")]

@@ -18,6 +18,9 @@ jobs:
       - name: Build
         run: dotnet build SolutionComponentCloner/SolutionComponentCloner.csproj -c Release
 
+      - name: Test
+        run: dotnet test SolutionComponentCloner.Tests/SolutionComponentCloner.Tests.csproj
+
       - name: Upload plugin
         uses: actions/upload-artifact@v4
         with:
