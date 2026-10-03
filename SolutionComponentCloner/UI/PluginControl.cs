@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Drawing;
+using System.IO;
 using System.Linq;
 using System.Windows.Forms;
 using Microsoft.Xrm.Sdk;
@@ -27,6 +29,8 @@ namespace SolutionComponentCloner.UI
         private Label _lblConnection;
         private Label _lblComponentCount;
         private Label _lblResultsSummary;
+        private Button _btnExportFailures;
+        private List<ComponentCopyResult> _lastResults = new List<ComponentCopyResult>();
 
         public PluginControl()
         {
@@ -316,15 +320,34 @@ namespace SolutionComponentCloner.UI
         {
             var group = CreateSectionGroup("Results", out var body);
 
-            _lblResultsSummary = new Label
+            var summaryBar = new TableLayoutPanel
             {
                 Dock = DockStyle.Top,
+                AutoSize = true,
+                ColumnCount = 2,
+                Margin = new Padding(0, 0, 0, 4)
+            };
+            summaryBar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            summaryBar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+            _lblResultsSummary = new Label
+            {
+                Dock = DockStyle.Fill,
                 Text = "No components copied yet.",
                 Font = Theme.FontSmall,
                 ForeColor = Theme.TextSecondary,
-                Height = 20,
-                Margin = new Padding(0, 0, 0, 4)
+                TextAlign = ContentAlignment.MiddleLeft,
+                AutoSize = false,
+                Height = 20
             };
+
+            _btnExportFailures = CreateSecondaryButton("Export failures...");
+            _btnExportFailures.Margin = new Padding(0);
+            _btnExportFailures.Enabled = false;
+            _btnExportFailures.Click += BtnExportFailures_Click;
+
+            summaryBar.Controls.Add(_lblResultsSummary, 0, 0);
+            summaryBar.Controls.Add(_btnExportFailures, 1, 0);
 
             _results = new ListView
             {
@@ -342,7 +365,7 @@ namespace SolutionComponentCloner.UI
             _results.Columns.Add("Details", 300);
 
             body.Controls.Add(_results);
-            body.Controls.Add(_lblResultsSummary);
+            body.Controls.Add(summaryBar);
             return group;
         }
 
@@ -572,6 +595,7 @@ namespace SolutionComponentCloner.UI
             var targetUniqueName = target.UniqueName;
 
             _results.Items.Clear();
+            _btnExportFailures.Enabled = false;
             _btnCopy.Enabled = false;
 
             WorkAsync(new WorkAsyncInfo
@@ -605,6 +629,7 @@ namespace SolutionComponentCloner.UI
         private void RenderResults(System.Collections.Generic.List<ComponentCopyResult> results)
         {
             _results.Items.Clear();
+            _lastResults = results;
 
             foreach (var result in results)
             {
@@ -622,6 +647,56 @@ namespace SolutionComponentCloner.UI
                 ? $"{succeeded} component(s) copied successfully."
                 : $"{succeeded} succeeded, {failed} failed.";
             _lblResultsSummary.ForeColor = failed == 0 ? Theme.Success : Theme.Danger;
+            _btnExportFailures.Enabled = failed > 0;
+        }
+
+        private void BtnExportFailures_Click(object sender, EventArgs e)
+        {
+            var failures = _lastResults.Where(r => r.Outcome == CopyOutcome.Failed).ToList();
+            if (failures.Count == 0)
+            {
+                return;
+            }
+
+            using (var dialog = new SaveFileDialog
+            {
+                Filter = "CSV files (*.csv)|*.csv|All files (*.*)|*.*",
+                FileName = "SolutionComponentCloner-failures.csv"
+            })
+            {
+                if (dialog.ShowDialog(this) != DialogResult.OK)
+                {
+                    return;
+                }
+
+                try
+                {
+                    var lines = new List<string> { "Component,Type,Result,Details" };
+                    lines.AddRange(failures.Select(r => string.Join(",",
+                        CsvField(r.Component.DisplayName),
+                        CsvField(r.Component.ComponentTypeName),
+                        "Failed",
+                        CsvField(r.Message))));
+
+                    File.WriteAllLines(dialog.FileName, lines);
+                }
+                catch (Exception ex)
+                {
+                    ShowErrorDialog(ex, "Solution Component Cloner", "Unable to save the export file.", false);
+                }
+            }
+        }
+
+        private static string CsvField(string value)
+        {
+            if (string.IsNullOrEmpty(value))
+            {
+                return string.Empty;
+            }
+
+            return value.IndexOfAny(new[] { ',', '"', '\n', '\r' }) >= 0
+                ? "\"" + value.Replace("\"", "\"\"") + "\""
+                : value;
         }
 
         #endregion
