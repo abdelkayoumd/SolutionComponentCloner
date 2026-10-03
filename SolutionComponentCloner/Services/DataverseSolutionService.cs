@@ -35,8 +35,10 @@ namespace SolutionComponentCloner.Services
                 .ToList();
         }
 
-        public List<SolutionComponentItem> GetSolutionComponents(IOrganizationService service, Guid solutionId)
+        public SolutionComponentLoadResult GetSolutionComponents(IOrganizationService service, Guid solutionId)
         {
+            var loadResult = new SolutionComponentLoadResult();
+
             var query = new QueryExpression("solutioncomponent")
             {
                 ColumnSet = new ColumnSet("objectid", "componenttype"),
@@ -54,7 +56,7 @@ namespace SolutionComponentCloner.Services
 
             foreach (var group in rows.GroupBy(r => r.ComponentType))
             {
-                ResolveDisplayNames(service, group.Key, group.ToList());
+                ResolveDisplayNames(service, group.Key, group.ToList(), loadResult.Warnings);
             }
 
             foreach (var row in rows)
@@ -69,10 +71,11 @@ namespace SolutionComponentCloner.Services
                 }
             }
 
-            return rows
+            loadResult.Items = rows
                 .OrderBy(r => r.ComponentTypeName)
                 .ThenBy(r => r.DisplayName)
                 .ToList();
+            return loadResult;
         }
 
         private static List<Entity> RetrieveAll(IOrganizationService service, QueryExpression query)
@@ -97,7 +100,7 @@ namespace SolutionComponentCloner.Services
             return results;
         }
 
-        private void ResolveDisplayNames(IOrganizationService service, int componentType, List<SolutionComponentItem> items)
+        private void ResolveDisplayNames(IOrganizationService service, int componentType, List<SolutionComponentItem> items, List<string> warnings)
         {
             try
             {
@@ -122,10 +125,11 @@ namespace SolutionComponentCloner.Services
                     ResolveDynamicComponentNames(service, componentType, items);
                 }
             }
-            catch (Exception)
+            catch (Exception ex)
             {
-                // Leave DisplayName/ComponentTypeName unset for this group; caller falls back to
-                // the raw id / component type number.
+                // Leave DisplayName/ComponentTypeName unset for this group; the caller falls back
+                // to the raw id / component type number, and the warning tells the user why.
+                warnings.Add($"{ComponentTypeCatalog.GetTypeName(componentType)} ({items.Count}): {ex.Message}");
             }
         }
 

@@ -38,6 +38,7 @@ namespace SolutionComponentCloner.UI
         private Button _btnExportFailures;
         private Button _btnToggleResults;
         private List<ComponentCopyResult> _lastResults = new List<ComponentCopyResult>();
+        private readonly ToolTip _toolTip = new ToolTip { AutoPopDelay = 20000 };
 
         public PluginControl()
         {
@@ -669,12 +670,23 @@ namespace SolutionComponentCloner.UI
                         return;
                     }
 
-                    var items = (System.Collections.Generic.List<SolutionComponentItem>)args.Result;
+                    var loaded = (SolutionComponentLoadResult)args.Result;
+                    var items = loaded.Items;
                     _components = new BindingList<SolutionComponentItem>(items);
                     _grid.DataSource = _components;
                     _lblComponentCount.Text = items.Count == 0
                         ? "This solution has no components."
                         : $"{items.Count} component(s) found.";
+                    _lblComponentCount.ForeColor = Theme.TextSecondary;
+                    _toolTip.SetToolTip(_lblComponentCount, null);
+
+                    if (loaded.Warnings.Count > 0)
+                    {
+                        _lblComponentCount.Text += $"  ⚠ names unavailable for {loaded.Warnings.Count} type(s) (hover for details)";
+                        _lblComponentCount.ForeColor = Theme.Danger;
+                        _toolTip.SetToolTip(_lblComponentCount, string.Join(Environment.NewLine, loaded.Warnings));
+                    }
+
                     _btnCopy.Enabled = items.Count > 0;
                 }
             });
