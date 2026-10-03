@@ -22,11 +22,13 @@ Dataverse / Dynamics 365 solution into another.
 
 - XrmToolBox (latest)
 - .NET Framework 4.8 (the current XrmToolBox plugin target)
+- To build from the command line: the .NET SDK. The `.slnx` solution file needs the .NET 9+ SDK
+  (or Visual Studio 2022 17.13+); with an older SDK, build the `.csproj` directly as shown below.
 
 ## Building
 
 ```bash
-dotnet build SolutionComponentCloner.sln -c Release
+dotnet build SolutionComponentCloner/SolutionComponentCloner.csproj -c Release
 ```
 
 ## Installing into XrmToolBox
