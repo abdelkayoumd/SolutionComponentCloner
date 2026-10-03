@@ -20,16 +20,23 @@ namespace SolutionComponentCloner.UI
 
         private SolutionPickerControl _cmbSource;
         private SolutionPickerControl _cmbTarget;
+        private Control _pickersPanel;
+        private TableLayoutPanel _pickerSummaryBar;
+        private Label _lblPickerSummary;
+        private Guid? _lastSourceId;
+        private Guid? _lastTargetId;
         private Button _btnSelectAll;
         private Button _btnSelectNone;
         private Button _btnCopy;
         private CheckBox _chkIncludeRequired;
         private DataGridView _grid;
+        private SplitContainer _split;
         private ListView _results;
         private Label _lblConnection;
         private Label _lblComponentCount;
         private Label _lblResultsSummary;
         private Button _btnExportFailures;
+        private Button _btnToggleResults;
         private List<ComponentCopyResult> _lastResults = new List<ComponentCopyResult>();
 
         public PluginControl()
@@ -61,22 +68,20 @@ namespace SolutionComponentCloner.UI
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
-                RowCount = 5,
+                RowCount = 4,
                 Padding = new Padding(14, 12, 14, 12),
                 BackColor = Theme.PageBackground
             };
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
             root.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            root.RowStyles.Add(new RowStyle(SizeType.Percent, 62));
-            root.RowStyles.Add(new RowStyle(SizeType.Percent, 38));
             Controls.Add(root);
 
             root.Controls.Add(BuildHeader(), 0, 0);
-            root.Controls.Add(BuildSolutionsPanel(), 0, 1);
-            root.Controls.Add(BuildOptionsBar(), 0, 2);
-            root.Controls.Add(BuildComponentsPanel(), 0, 3);
-            root.Controls.Add(BuildResultsPanel(), 0, 4);
+            root.Controls.Add(BuildSolutionSection(), 0, 1);
+            root.Controls.Add(BuildSplit(), 0, 2);
+            root.Controls.Add(BuildResultsStrip(), 0, 3);
         }
 
         private Control BuildHeader()
@@ -132,11 +137,25 @@ namespace SolutionComponentCloner.UI
             return panel;
         }
 
+        private Control BuildSolutionSection()
+        {
+            var section = new Panel
+            {
+                Dock = DockStyle.Top,
+                AutoSize = true
+            };
+
+            _pickersPanel = BuildSolutionsPanel();
+            section.Controls.Add(_pickersPanel);
+            section.Controls.Add(BuildPickerSummaryBar());
+            return section;
+        }
+
         private Control BuildSolutionsPanel()
         {
             var panel = new TableLayoutPanel
             {
-                Dock = DockStyle.Fill,
+                Dock = DockStyle.Top,
                 AutoSize = true,
                 ColumnCount = 3,
                 Margin = new Padding(0, 0, 0, 10)
@@ -162,9 +181,71 @@ namespace SolutionComponentCloner.UI
             panel.Controls.Add(arrow, 1, 0);
             panel.Controls.Add(targetGroup, 2, 0);
 
-            _cmbSource.SelectionChanged += (s, e) => LoadSourceComponentsAsync();
+            _cmbSource.SelectionChanged += (s, e) =>
+            {
+                LoadSourceComponentsAsync();
+                OnSolutionSelectionChanged();
+            };
+            _cmbTarget.SelectionChanged += (s, e) => OnSolutionSelectionChanged();
 
             return panel;
+        }
+
+        private Control BuildPickerSummaryBar()
+        {
+            _pickerSummaryBar = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                ColumnCount = 2,
+                Margin = new Padding(0, 0, 0, 10),
+                Visible = false
+            };
+            _pickerSummaryBar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            _pickerSummaryBar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+            _lblPickerSummary = new Label
+            {
+                AutoSize = true,
+                Font = Theme.FontRegular,
+                ForeColor = Theme.TextPrimary,
+                Anchor = AnchorStyles.Left,
+                Margin = new Padding(2, 7, 0, 0)
+            };
+
+            var btnChange = CreateSecondaryButton("Change");
+            btnChange.Margin = new Padding(0);
+            btnChange.Click += (s, e) => ShowPickers(true);
+
+            _pickerSummaryBar.Controls.Add(_lblPickerSummary, 0, 0);
+            _pickerSummaryBar.Controls.Add(btnChange, 1, 0);
+            return _pickerSummaryBar;
+        }
+
+        private void OnSolutionSelectionChanged()
+        {
+            var source = _cmbSource.SelectedSolution;
+            var target = _cmbTarget.SelectedSolution;
+            if (source == null || target == null)
+            {
+                return;
+            }
+
+            if (source.SolutionId == _lastSourceId && target.SolutionId == _lastTargetId)
+            {
+                return;
+            }
+
+            _lastSourceId = source.SolutionId;
+            _lastTargetId = target.SolutionId;
+            _lblPickerSummary.Text = $"Source: {source.FriendlyName}     →     Target: {target.FriendlyName}";
+            ShowPickers(false);
+        }
+
+        private void ShowPickers(bool show)
+        {
+            _pickersPanel.Visible = show;
+            _pickerSummaryBar.Visible = !show;
         }
 
         private Control BuildSolutionPicker(string label, out SolutionPickerControl picker)
@@ -193,58 +274,27 @@ namespace SolutionComponentCloner.UI
             return stack;
         }
 
-        private Control BuildOptionsBar()
+        private Control BuildSplit()
         {
-            var panel = new FlowLayoutPanel
+            _split = new SplitContainer
             {
                 Dock = DockStyle.Fill,
-                AutoSize = true,
-                WrapContents = false,
-                FlowDirection = FlowDirection.LeftToRight,
-                Margin = new Padding(0, 0, 0, 8)
+                Orientation = Orientation.Horizontal,
+                Panel1MinSize = 160,
+                Panel2MinSize = 60,
+                SplitterWidth = 6,
+                BackColor = Theme.PageBackground,
+                Panel2Collapsed = true
             };
 
-            _chkIncludeRequired = new CheckBox
-            {
-                Text = "Include required components",
-                AutoSize = true,
-                Font = Theme.FontRegular,
-                ForeColor = Theme.TextPrimary,
-                Margin = new Padding(0, 6, 18, 0)
-            };
-
-            _btnSelectAll = CreateSecondaryButton("Select all");
-            _btnSelectAll.Click += (s, e) => SetAllSelected(true);
-
-            _btnSelectNone = CreateSecondaryButton("Select none");
-            _btnSelectNone.Click += (s, e) => SetAllSelected(false);
-            _btnSelectNone.Margin = new Padding(6, 0, 24, 0);
-
-            _btnCopy = CreatePrimaryButton("Copy selected → target");
-            _btnCopy.Click += BtnCopy_Click;
-
-            panel.Controls.Add(_chkIncludeRequired);
-            panel.Controls.Add(_btnSelectAll);
-            panel.Controls.Add(_btnSelectNone);
-            panel.Controls.Add(_btnCopy);
-
-            return panel;
+            _split.Panel1.Controls.Add(BuildComponentsPanel());
+            _split.Panel2.Controls.Add(BuildResultsList());
+            return _split;
         }
 
         private Control BuildComponentsPanel()
         {
-            var group = CreateSectionGroup("Components in source solution", out var body);
-
-            _lblComponentCount = new Label
-            {
-                Dock = DockStyle.Top,
-                Text = "Choose a source solution to load its components.",
-                Font = Theme.FontSmall,
-                ForeColor = Theme.TextSecondary,
-                AutoSize = false,
-                Height = 20,
-                Margin = new Padding(0, 0, 0, 4)
-            };
+            var group = CreateBorderedPanel(out var body);
 
             _grid = new DataGridView
             {
@@ -311,44 +361,61 @@ namespace SolutionComponentCloner.UI
 
             _grid.CellPainting += (s, e) => PaintComponentCell(e, colName.Index);
 
-            body.Controls.Add(_grid);
-            body.Controls.Add(_lblComponentCount);
-            return group;
-        }
+            _lblComponentCount = new Label
+            {
+                Text = "Choose a source solution to load its components.",
+                Font = Theme.FontSmall,
+                ForeColor = Theme.TextSecondary,
+                AutoSize = true,
+                Margin = new Padding(0, 9, 14, 0)
+            };
 
-        private Control BuildResultsPanel()
-        {
-            var group = CreateSectionGroup("Results", out var body);
+            _chkIncludeRequired = new CheckBox
+            {
+                Text = "Include required components",
+                AutoSize = true,
+                Font = Theme.FontRegular,
+                ForeColor = Theme.TextPrimary,
+                Margin = new Padding(0, 5, 14, 0)
+            };
 
-            var summaryBar = new TableLayoutPanel
+            _btnSelectAll = CreateSecondaryButton("Select all");
+            _btnSelectAll.Click += (s, e) => SetAllSelected(true);
+
+            _btnSelectNone = CreateSecondaryButton("Select none");
+            _btnSelectNone.Click += (s, e) => SetAllSelected(false);
+
+            _btnCopy = CreatePrimaryButton("Copy selected → target");
+            _btnCopy.Click += BtnCopy_Click;
+
+            var header = new FlowLayoutPanel
             {
                 Dock = DockStyle.Top,
                 AutoSize = true,
-                ColumnCount = 2,
-                Margin = new Padding(0, 0, 0, 4)
+                WrapContents = false,
+                Margin = new Padding(0, 0, 0, 6)
             };
-            summaryBar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            summaryBar.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-
-            _lblResultsSummary = new Label
+            header.Controls.Add(new Label
             {
-                Dock = DockStyle.Fill,
-                Text = "No components copied yet.",
-                Font = Theme.FontSmall,
-                ForeColor = Theme.TextSecondary,
-                TextAlign = ContentAlignment.MiddleLeft,
-                AutoSize = false,
-                Height = 20
-            };
+                Text = "Components in source solution",
+                Font = Theme.FontSectionHeader,
+                ForeColor = Theme.TextPrimary,
+                AutoSize = true,
+                Margin = new Padding(0, 8, 14, 0)
+            });
+            header.Controls.Add(_lblComponentCount);
+            header.Controls.Add(_chkIncludeRequired);
+            header.Controls.Add(_btnSelectAll);
+            header.Controls.Add(_btnSelectNone);
+            header.Controls.Add(_btnCopy);
 
-            _btnExportFailures = CreateSecondaryButton("Export failures...");
-            _btnExportFailures.Margin = new Padding(0);
-            _btnExportFailures.Enabled = false;
-            _btnExportFailures.Click += BtnExportFailures_Click;
+            body.Controls.Add(_grid);
+            body.Controls.Add(header);
+            return group;
+        }
 
-            summaryBar.Controls.Add(_lblResultsSummary, 0, 0);
-            summaryBar.Controls.Add(_btnExportFailures, 1, 0);
-
+        private Control BuildResultsList()
+        {
             _results = new ListView
             {
                 Dock = DockStyle.Fill,
@@ -363,20 +430,100 @@ namespace SolutionComponentCloner.UI
             _results.Columns.Add("Type", 160);
             _results.Columns.Add("Result", 90);
             _results.Columns.Add("Details", 300);
-
-            body.Controls.Add(_results);
-            body.Controls.Add(summaryBar);
-            return group;
+            return _results;
         }
 
-        private Control CreateSectionGroup(string title, out Panel body)
+        private Control BuildResultsStrip()
+        {
+            var strip = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                AutoSize = true,
+                ColumnCount = 4,
+                Margin = new Padding(0, 8, 0, 0)
+            };
+            strip.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            strip.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            strip.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            strip.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+            var title = new Label
+            {
+                Text = "Results",
+                Font = Theme.FontSectionHeader,
+                ForeColor = Theme.TextPrimary,
+                AutoSize = true,
+                Anchor = AnchorStyles.Left,
+                Margin = new Padding(0, 6, 12, 0)
+            };
+
+            _lblResultsSummary = new Label
+            {
+                Text = "No components copied yet.",
+                Font = Theme.FontSmall,
+                ForeColor = Theme.TextSecondary,
+                AutoSize = true,
+                Anchor = AnchorStyles.Left,
+                Margin = new Padding(0, 7, 0, 0)
+            };
+
+            _btnExportFailures = CreateSecondaryButton("Export failures...");
+            _btnExportFailures.Margin = new Padding(0, 0, 6, 0);
+            _btnExportFailures.Enabled = false;
+            _btnExportFailures.Click += BtnExportFailures_Click;
+
+            _btnToggleResults = CreateSecondaryButton("Show details");
+            _btnToggleResults.Margin = new Padding(0);
+            _btnToggleResults.Click += (s, e) =>
+            {
+                if (_split.Panel2Collapsed)
+                {
+                    ShowResultDetails();
+                }
+                else
+                {
+                    HideResultDetails();
+                }
+            };
+
+            strip.Controls.Add(title, 0, 0);
+            strip.Controls.Add(_lblResultsSummary, 1, 0);
+            strip.Controls.Add(_btnExportFailures, 2, 0);
+            strip.Controls.Add(_btnToggleResults, 3, 0);
+            return strip;
+        }
+
+        private void ShowResultDetails()
+        {
+            if (!_split.Panel2Collapsed)
+            {
+                return;
+            }
+
+            _split.Panel2Collapsed = false;
+
+            var maxPanel1 = _split.Height - _split.Panel2MinSize - _split.SplitterWidth;
+            if (maxPanel1 >= _split.Panel1MinSize)
+            {
+                _split.SplitterDistance = Math.Max(_split.Panel1MinSize, Math.Min((int)(_split.Height * 0.6), maxPanel1));
+            }
+
+            _btnToggleResults.Text = "Hide details";
+        }
+
+        private void HideResultDetails()
+        {
+            _split.Panel2Collapsed = true;
+            _btnToggleResults.Text = "Show details";
+        }
+
+        private Panel CreateBorderedPanel(out Panel body)
         {
             var outer = new Panel
             {
                 Dock = DockStyle.Fill,
                 BackColor = Theme.PanelBackground,
-                Padding = new Padding(12, 10, 12, 10),
-                Margin = new Padding(0, 0, 0, 10)
+                Padding = new Padding(12, 10, 12, 10)
             };
             outer.Paint += (s, e) =>
             {
@@ -386,19 +533,8 @@ namespace SolutionComponentCloner.UI
                 }
             };
 
-            var header = new Label
-            {
-                Dock = DockStyle.Top,
-                Text = title,
-                Font = Theme.FontSectionHeader,
-                ForeColor = Theme.TextPrimary,
-                Height = 22
-            };
-
             body = new Panel { Dock = DockStyle.Fill };
-
             outer.Controls.Add(body);
-            outer.Controls.Add(header);
             return outer;
         }
 
@@ -648,6 +784,7 @@ namespace SolutionComponentCloner.UI
                 : $"{succeeded} succeeded, {failed} failed.";
             _lblResultsSummary.ForeColor = failed == 0 ? Theme.Success : Theme.Danger;
             _btnExportFailures.Enabled = failed > 0;
+            ShowResultDetails();
         }
 
         private void BtnExportFailures_Click(object sender, EventArgs e)
