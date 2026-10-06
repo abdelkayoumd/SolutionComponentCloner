@@ -1,127 +1,43 @@
 # Solution Component Cloner
 
-An [XrmToolBox](https://www.xrmtoolbox.com/) plugin that copies components from one
-Dataverse / Dynamics 365 solution into another.
+An [XrmToolBox](https://www.xrmtoolbox.com/) tool that copies components from one Dataverse / Dynamics 365
+solution into another, browsing the source solution the way the Power Apps solution explorer does.
 
-## What it does
+![Choose a source and a target solution](docs/screenshots/1-select-solutions.png)
 
-1. Connect to an organization (via the standard XrmToolBox connection dialog).
-2. Pick a **source** solution and a **target** (unmanaged) solution.
-3. The grid lists every component in the source solution as a tree, like the Power Apps solution
-   explorer: components are grouped by type, each table holds its columns, relationships, keys,
-   forms, views, charts, dashboards and business rules, and web resources are split into Code,
-   Data and Images. Folders have tri-state checkboxes, so one click selects everything inside.
-4. Check the components you want to copy.
-5. Toggle **Include required components**:
-   - **Checked** — each selected component is added to the target solution along with
-     everything Dataverse considers a required dependency (e.g. adding a form also pulls
-     in the entity, the view it depends on, etc.), the same behavior as `AddRequiredComponents = true`
-     on `AddSolutionComponentRequest`.
-   - **Unchecked** — only the exact components you selected are added, nothing else.
-6. Click **Copy selected → target**. Results (success/failure per component) are listed at
-   the bottom.
+## Features
 
-## Requirements
+- **Solution explorer tree** – the source solution's components are grouped by type. Tables hold their
+  columns, relationships, keys, forms, views, charts, dashboards and business rules, and web resources are
+  split into Code, Data and Images. Folders show counts, such as "Web resources (19)".
+- **Select exactly what you need** – every folder has a tri-state checkbox, so one click selects everything
+  inside it. Select all, Clear selection, and Expand / Collapse all are one click away. Large solutions open
+  collapsed so every type fits on one screen.
+- **Include required components** – optionally add each component's dependencies too (the same behaviour as
+  `AddRequiredComponents` on `AddSolutionComponentRequest`), or copy only what you ticked.
+- **Safe copying** – only unmanaged solutions are accepted as a target. Tables are copied before their
+  columns, forms and views, and Model-driven apps carry a warning because they always pull in everything
+  they are built from.
+- **Clear results** – a banner summarises how many components were copied or failed, with a per-component
+  list one click away. Failures can be exported to CSV.
+- **Readable names everywhere** – including custom and ISV component types, which are resolved through
+  `solutioncomponentdefinition`. Solutions and components with thousands of rows are loaded in full.
 
-- XrmToolBox (latest)
-- .NET Framework 4.8 (the current XrmToolBox plugin target)
-- To build from the command line: the .NET SDK. The `.slnx` solution file needs the .NET 9+ SDK
-  (or Visual Studio 2022 17.13+); with an older SDK, build the `.csproj` directly as shown below.
+## Screenshots
 
-## Building
+**Browse the tree and tick what to copy**
 
-```bash
-dotnet build SolutionComponentCloner/SolutionComponentCloner.csproj -c Release
-```
+![Components grouped by type, with a table expanded](docs/screenshots/2-components-tree.png)
 
-## Running the tests
+**Review the results**
 
-```bash
-dotnet test SolutionComponentCloner.Tests/SolutionComponentCloner.Tests.csproj
-```
+![Copy results with a failure banner and details](docs/screenshots/3-copy-results.png)
 
-The tests use a hand-written fake `IOrganizationService`, so no Dataverse connection is needed.
+## Install
 
-## Publishing to the XrmToolBox Tool Library
-
-Follows the [official guide](https://www.xrmtoolbox.com/documentation/for-developers/deploy-your-plugin-in-plugins-store/).
-
-1. Bump the version in **both** `Version` in `SolutionComponentCloner.csproj` and
-   `AssemblyVersion`/`AssemblyFileVersion` in `Properties/AssemblyInfo.cs` (they must match, or users
-   get false "update available" prompts), and update `<releaseNotes>` in
-   `SolutionComponentCloner.nuspec`.
-2. Commit and push, then tag the release: `git tag v1.0.1` and `git push origin v1.0.1`. The
-   `release` workflow checks the tag matches the versions above, runs the tests, builds the package,
-   creates a GitHub release with the `.nupkg` and DLL attached, and pushes the package to nuget.org.
-   The nuget.org push uses Trusted Publishing, so no API key is stored: nuget.org has a policy
-   trusting this repository's `release.yml` workflow (nuget.org, your name, Trusted Publishing).
-   To build the package locally instead:
-   `dotnet pack SolutionComponentCloner/SolutionComponentCloner.csproj -c Release -o nupkg`.
-3. The first time only: wait for nuget.org to index the package, then register the tool at
-   <https://www.xrmtoolbox.com/plugins/new/> using the NuGet package id `SolutionComponentCloner`.
-   An administrator reviews it, which can take several days. Later versions are picked up from
-   nuget.org automatically.
-
-The nuspec must keep the `XrmToolBox` tag, the `XrmToolBox` dependency, the icon and project URLs
-(the repository must be public for those links to resolve), and the DLL under `lib/net48/Plugins/`.
-
-## Installing into XrmToolBox
-
-Every build (Debug or Release) automatically copies `SolutionComponentCloner.dll` and its
-`.pdb` into `%AppData%\MscrmTools\XrmToolBox\Plugins\` via an MSBuild post-build target — no
-manual copy step needed. Just build, then (re)start XrmToolBox and the tool appears as
-**Solution Component Cloner**.
-
-If you ever need to do it by hand: copy
-`SolutionComponentCloner\bin\Release\SolutionComponentCloner.dll` (and the matching `.pdb`)
-into that same Plugins folder.
-
-## Debugging (F5 in Visual Studio)
-
-`SolutionComponentCloner.csproj.user` (gitignored, machine-specific) points the debugger at
-a local XrmToolBox install and passes `/plugin:"Solution Component Cloner"` so it jumps
-straight to this tool instead of the tool list. If you clone this repo on a different
-machine, create/edit that file yourself:
-
-```xml
-<Project>
-  <PropertyGroup>
-    <StartAction>Program</StartAction>
-    <StartProgram>C:\path\to\your\XrmToolBox.exe</StartProgram>
-    <StartArguments>/plugin:"Solution Component Cloner"</StartArguments>
-    <StartWorkingDirectory>C:\path\to\your\XrmToolBox</StartWorkingDirectory>
-  </PropertyGroup>
-</Project>
-```
-
-Set a breakpoint, hit F5, connect to an org, and step through as normal. Make sure your
-local XrmToolBox's `XrmToolBox.Extensibility.dll` version matches the `XrmToolBoxPackage`
-version in the `.csproj` — a mismatch there is the most common source of confusing runtime
-errors when debugging a plugin.
-
-## Project layout
-
-```
-SolutionComponentCloner/
-  Plugin.cs                     Plugin entry point (MEF export + metadata/icons)
-  UI/PluginControl.cs           Main tool UI (WinForms, built in code)
-  UI/Theme.cs                   Shared colors/fonts
-  Services/DataverseSolutionService.cs   Solution + component queries, copy logic
-  Services/MetadataNameCache.cs          Lazy metadata cache for entity/attribute/etc. names
-  Services/ComponentTypeCatalog.cs       componenttype -> friendly name / table mapping
-  Models/                        Plain data models used by the UI and services
-  Resources/PluginImages.cs      Base64 plugin icons
-```
-
-## Notes on component type coverage
-
-The component grid resolves friendly names for the most common component types (forms,
-views, web resources, plugin steps, workflows, entities, attributes, relationships, option
-sets, etc.). Less common types still show up and can still be copied — they just fall back
-to showing their raw type number and record id if a friendly-name lookup isn't implemented.
-
-Copying itself doesn't depend on name resolution: it calls `AddSolutionComponentRequest`
-with the component's real id and type, so unrecognized types copy correctly too.
+- From the XrmToolBox Tool Library: search for **Solution Component Cloner**.
+- Or download the latest DLL from the [Releases](https://github.com/abdelkayoumd/SolutionComponentCloner/releases)
+  page and copy it into XrmToolBox's `Plugins` folder.
 
 ## License
 
