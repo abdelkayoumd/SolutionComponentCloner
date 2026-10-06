@@ -1,0 +1,58 @@
+name: release
+
+# Runs only when a version tag like v1.0.0 is pushed.
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Check the tag matches the project version
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          csproj=$(grep -oP '(?<=<Version>)[^<]+' SolutionComponentCloner/SolutionComponentCloner.csproj | head -1)
+          assembly=$(grep -oP '(?<=AssemblyVersion\(")[^"]+' SolutionComponentCloner/Properties/AssemblyInfo.cs | head -1)
+          file=$(grep -oP '(?<=AssemblyFileVersion\(")[^"]+' SolutionComponentCloner/Properties/AssemblyInfo.cs | head -1)
+          echo "tag=$tag csproj=$csproj assembly=$assembly file=$file"
+          if [ "$tag" != "$csproj" ] || [ "$tag.0" != "$assembly" ] || [ "$tag.0" != "$file" ]; then
+            echo "::error::Tag v$tag must equal <Version> in the csproj ($csproj) and AssemblyVersion/AssemblyFileVersion ($assembly / $file) with a trailing .0"
+            exit 1
+          fi
+
+      - name: Test
+        run: dotnet test SolutionComponentCloner.Tests/SolutionComponentCloner.Tests.csproj
+
+      - name: Pack
+        run: dotnet pack SolutionComponentCloner/SolutionComponentCloner.csproj -c Release -o nupkg
+
+      - name: Create GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >
+          gh release create "$GITHUB_REF_NAME" nupkg/*.nupkg SolutionComponentCloner/bin/Release/SolutionComponentCloner.dll
+          --title "$GITHUB_REF_NAME" --generate-notes
+
+      - name: Push to nuget.org
+        shell: bash
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          if [ -z "$NUGET_API_KEY" ]; then
+            echo "::warning::NUGET_API_KEY secret is not set; skipping the nuget.org push. The package is attached to the GitHub release."
+            exit 0
+          fi
+          dotnet nuget push nupkg/*.nupkg --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate

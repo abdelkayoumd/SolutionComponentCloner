@@ -50,12 +50,17 @@ Follows the [official guide](https://www.xrmtoolbox.com/documentation/for-develo
    `AssemblyVersion`/`AssemblyFileVersion` in `Properties/AssemblyInfo.cs` (they must match, or users
    get false "update available" prompts), and update `<releaseNotes>` in
    `SolutionComponentCloner.nuspec`.
-2. `dotnet pack SolutionComponentCloner/SolutionComponentCloner.csproj -c Release -o nupkg`
-   (CI also uploads the package as a build artifact).
-3. Push the `.nupkg` to nuget.org (needs your account and an API key).
-4. Wait for nuget.org to index it, then register the tool at
+2. Commit and push, then tag the release: `git tag v1.0.1` and `git push origin v1.0.1`. The
+   `release` workflow checks the tag matches the versions above, runs the tests, builds the package,
+   creates a GitHub release with the `.nupkg` and DLL attached, and pushes the package to nuget.org.
+   The nuget.org push needs a `NUGET_API_KEY` repository secret (Settings, Secrets and variables,
+   Actions); without it the workflow skips that step and the package stays on the GitHub release.
+   To build the package locally instead:
+   `dotnet pack SolutionComponentCloner/SolutionComponentCloner.csproj -c Release -o nupkg`.
+3. The first time only: wait for nuget.org to index the package, then register the tool at
    <https://www.xrmtoolbox.com/plugins/new/> using the NuGet package id `SolutionComponentCloner`.
-   An administrator reviews it, which can take several days.
+   An administrator reviews it, which can take several days. Later versions are picked up from
+   nuget.org automatically.
 
 The nuspec must keep the `XrmToolBox` tag, the `XrmToolBox` dependency, the icon and project URLs
 (the repository must be public for those links to resolve), and the DLL under `lib/net48/Plugins/`.
