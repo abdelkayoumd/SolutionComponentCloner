@@ -117,3 +117,7 @@ to showing their raw type number and record id if a friendly-name lookup isn't i
 
 Copying itself doesn't depend on name resolution: it calls `AddSolutionComponentRequest`
 with the component's real id and type, so unrecognized types copy correctly too.
+
+## License
+
+[MIT](LICENSE) © 2026 abdelkayoumd

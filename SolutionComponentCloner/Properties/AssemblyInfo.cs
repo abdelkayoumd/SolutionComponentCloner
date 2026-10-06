@@ -9,7 +9,7 @@ using System.Runtime.InteropServices;
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("abdel")]
 [assembly: AssemblyProduct("SolutionComponentCloner")]
-[assembly: AssemblyCopyright("Copyright © 2026")]
+[assembly: AssemblyCopyright("Copyright © 2026 abdelkayoumd")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
 

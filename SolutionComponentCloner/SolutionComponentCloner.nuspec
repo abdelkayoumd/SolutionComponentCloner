@@ -5,6 +5,7 @@
     <version>$version$</version>
     <title>Solution Component Cloner</title>
     <authors>abdel</authors>
+    <license type="expression">MIT</license>
     <description>Copies components from one Dataverse / Dynamics 365 solution into another, with optional required-component inclusion. Pick a source and an unmanaged target solution, select components, and copy them in one click.</description>
     <releaseNotes>1.0.0: First release. Copy components between solutions (with or without required components), paged solution and component loading, readable names for custom component types, and export of failed copies to CSV.</releaseNotes>
     <tags>XrmToolBox</tags>
