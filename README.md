@@ -7,7 +7,10 @@ Dataverse / Dynamics 365 solution into another.
 
 1. Connect to an organization (via the standard XrmToolBox connection dialog).
 2. Pick a **source** solution and a **target** (unmanaged) solution.
-3. The grid lists every component in the source solution, grouped by type.
+3. The grid lists every component in the source solution as a tree, like the Power Apps solution
+   explorer: components are grouped by type, each table holds its columns, relationships, keys,
+   forms, views, charts, dashboards and business rules, and web resources are split into Code,
+   Data and Images. Folders have tri-state checkboxes, so one click selects everything inside.
 4. Check the components you want to copy.
 5. Toggle **Include required components**:
    - **Checked** — each selected component is added to the target solution along with

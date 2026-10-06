@@ -78,9 +78,54 @@ namespace SolutionComponentCloner.Services
             { "systemform", "formid" }
         };
 
+        public const string TablesGroup = "Tables";
+        public const int WebResource = 61;
+        public const int Workflow = 29;
+        public const int View = 26;
+        public const int Chart = 59;
+
+        // Plural folder names, matching the Power Apps solution explorer.
+        private static readonly Dictionary<int, string> GroupNames = new Dictionary<int, string>
+        {
+            { 1, TablesGroup }, { 2, "Columns" }, { 9, "Option sets" }, { 10, "Relationships" }, { 14, "Keys" },
+            { 18, "Queues" }, { 20, "Security roles" }, { 26, "Views" }, { 29, "Processes" }, { 31, "Reports" },
+            { 36, "Email templates" }, { 44, "Duplicate detection rules" }, { 59, "Charts" }, { 60, "Forms" },
+            { 61, "Web resources" }, { 62, "Site maps" }, { 63, "Connection roles" }, { 65, "Field security profiles" },
+            { 68, "Plug-in types" }, { 69, "Plug-in assemblies" }, { 70, "Plug-in steps" }, { 71, "Plug-in step images" },
+            { 72, "Service endpoints" }, { 80, "Model-driven apps" }, { 92, "SLAs" }, { 150, "Mobile offline profiles" },
+            { 152, "Similarity rules" }, { 154, "Custom controls" }, { 201, "Custom APIs" },
+            { 202, "Custom API request parameters" }, { 203, "Custom API response properties" }
+        };
+
         public static string GetTypeName(int componentType)
         {
             return Definitions.TryGetValue(componentType, out var def) ? def.DisplayName : $"Component Type {componentType}";
+        }
+
+        public static string GetGroupName(int componentType, string fallbackTypeName)
+        {
+            if (GroupNames.TryGetValue(componentType, out var name))
+            {
+                return name;
+            }
+
+            return string.IsNullOrEmpty(fallbackTypeName) ? GetTypeName(componentType) : fallbackTypeName;
+        }
+
+        /// <summary>Maps a web resource's webresourcetype value to the Code / Data / Images folders the maker portal uses.</summary>
+        public static string GetWebResourceSubGroup(int webResourceType)
+        {
+            switch (webResourceType)
+            {
+                case 1: case 2: case 3: case 8:
+                    return "Code";
+                case 4: case 9: case 12:
+                    return "Data";
+                case 5: case 6: case 7: case 10: case 11:
+                    return "Images";
+                default:
+                    return "Other";
+            }
         }
 
         public static string GetPrimaryKeyAttribute(ComponentTypeDefinition definition)

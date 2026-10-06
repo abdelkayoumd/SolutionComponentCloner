@@ -621,7 +621,10 @@ namespace SolutionComponentCloner.UI
         {
             var target = _cmbTarget.SelectedSolution;
             var source = _cmbSource.SelectedSolution;
-            var selected = _grid.SelectedComponents.ToList();
+            // Tables first, so a table is already in the target when its columns, forms and views are added.
+            var selected = _grid.SelectedComponents
+                .OrderBy(c => c.ComponentType == ComponentTypeCatalog.Entity ? 0 : 1)
+                .ToList();
 
             if (source == null || target == null)
             {

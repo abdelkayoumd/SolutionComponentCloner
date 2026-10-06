@@ -69,6 +69,15 @@ namespace SolutionComponentCloner.Services
                 {
                     row.DisplayName = row.ObjectId.ToString();
                 }
+
+                if (row.TableName != null)
+                {
+                    row.GroupName = ComponentTypeCatalog.TablesGroup;
+                }
+                else if (string.IsNullOrEmpty(row.GroupName))
+                {
+                    row.GroupName = ComponentTypeCatalog.GetGroupName(row.ComponentType, row.ComponentTypeName);
+                }
             }
 
             loadResult.Items = rows
@@ -113,7 +122,8 @@ namespace SolutionComponentCloner.Services
                     else
                     {
                         var primaryKey = ComponentTypeCatalog.GetPrimaryKeyAttribute(definition);
-                        ResolveTableBackedNames(service, definition.EntityLogicalName, primaryKey, definition.NameAttribute, items);
+                        var applier = GetHierarchyApplier(componentType, out var extraColumns);
+                        ResolveTableBackedNames(service, definition.EntityLogicalName, primaryKey, definition.NameAttribute, items, extraColumns, applier);
                     }
                 }
                 else
@@ -123,6 +133,11 @@ namespace SolutionComponentCloner.Services
                     // it generically via solutioncomponentdefinition + entity metadata instead of
                     // just showing "Component Type N".
                     ResolveDynamicComponentNames(service, componentType, items);
+                }
+
+                foreach (var item in items.Where(i => i.TableName != null && i.TableLabel == null))
+                {
+                    item.TableLabel = _metadataCache.GetEntityLabel(service, item.TableName);
                 }
             }
             catch (Exception ex)
@@ -172,15 +187,23 @@ namespace SolutionComponentCloner.Services
                 {
                     case ComponentTypeCatalog.Entity:
                         item.DisplayName = _metadataCache.GetEntityName(service, item.ObjectId);
+                        item.TableName = _metadataCache.GetEntityLogicalName(service, item.ObjectId);
+                        item.TableLabel = item.DisplayName;
                         break;
                     case ComponentTypeCatalog.Attribute:
                         item.DisplayName = _metadataCache.GetAttributeName(service, item.ObjectId);
+                        item.TableName = _metadataCache.GetAttributeTable(service, item.ObjectId);
+                        item.Category = "Columns";
                         break;
                     case ComponentTypeCatalog.Relationship:
                         item.DisplayName = _metadataCache.GetRelationshipName(service, item.ObjectId);
+                        item.TableName = _metadataCache.GetRelationshipTable(service, item.ObjectId);
+                        item.Category = "Relationships";
                         break;
                     case ComponentTypeCatalog.EntityKey:
                         item.DisplayName = _metadataCache.GetEntityKeyName(service, item.ObjectId);
+                        item.TableName = _metadataCache.GetEntityKeyTable(service, item.ObjectId);
+                        item.Category = "Keys";
                         break;
                     case ComponentTypeCatalog.OptionSet:
                         item.DisplayName = _metadataCache.GetOptionSetName(service, item.ObjectId);
@@ -189,7 +212,65 @@ namespace SolutionComponentCloner.Services
             }
         }
 
-        private static void ResolveTableBackedNames(IOrganizationService service, string entityLogicalName, string primaryKey, string nameAttribute, List<SolutionComponentItem> items)
+        /// <summary>
+        /// For component types that live inside a table (forms, views, charts, business rules) or have a
+        /// sub-folder (web resources), returns the extra columns to read and how to file each item.
+        /// </summary>
+        private static Action<SolutionComponentItem, Entity> GetHierarchyApplier(int componentType, out string[] extraColumns)
+        {
+            switch (componentType)
+            {
+                case ComponentTypeCatalog.Form:
+                    extraColumns = new[] { "objecttypecode", "type" };
+                    return (item, e) =>
+                    {
+                        var formType = e.GetAttributeValue<OptionSetValue>("type")?.Value;
+                        var isDashboard = formType == 0 || formType == 10;
+                        Place(item, e.GetAttributeValue<string>("objecttypecode"), isDashboard ? "Dashboards" : "Forms", isDashboard ? "Dashboards" : null);
+                    };
+                case ComponentTypeCatalog.View:
+                    extraColumns = new[] { "returnedtypecode" };
+                    return (item, e) => Place(item, e.GetAttributeValue<string>("returnedtypecode"), "Views", null);
+                case ComponentTypeCatalog.Chart:
+                    extraColumns = new[] { "primaryentitytypecode" };
+                    return (item, e) => Place(item, e.GetAttributeValue<string>("primaryentitytypecode"), "Charts", null);
+                case ComponentTypeCatalog.Workflow:
+                    extraColumns = new[] { "primaryentity", "category" };
+                    return (item, e) =>
+                    {
+                        if (e.GetAttributeValue<OptionSetValue>("category")?.Value == 2)
+                        {
+                            Place(item, e.GetAttributeValue<string>("primaryentity"), "Business rules", null);
+                        }
+                    };
+                case ComponentTypeCatalog.WebResource:
+                    extraColumns = new[] { "webresourcetype" };
+                    return (item, e) =>
+                    {
+                        var type = e.GetAttributeValue<OptionSetValue>("webresourcetype")?.Value;
+                        item.SubGroup = type.HasValue ? ComponentTypeCatalog.GetWebResourceSubGroup(type.Value) : "Other";
+                    };
+                default:
+                    extraColumns = null;
+                    return null;
+            }
+        }
+
+        private static void Place(SolutionComponentItem item, string table, string category, string flatGroup)
+        {
+            if (!string.IsNullOrEmpty(table) && !string.Equals(table, "none", StringComparison.OrdinalIgnoreCase))
+            {
+                item.TableName = table;
+                item.Category = category;
+            }
+            else if (flatGroup != null)
+            {
+                item.GroupName = flatGroup;
+            }
+        }
+
+        private static void ResolveTableBackedNames(IOrganizationService service, string entityLogicalName, string primaryKey, string nameAttribute, List<SolutionComponentItem> items,
+            string[] extraColumns = null, Action<SolutionComponentItem, Entity> applyExtra = null)
         {
             const int batchSize = 500;
             for (var offset = 0; offset < items.Count; offset += batchSize)
@@ -197,22 +278,35 @@ namespace SolutionComponentCloner.Services
                 var batch = items.Skip(offset).Take(batchSize).ToList();
                 var ids = batch.Select(i => (object)i.ObjectId).ToArray();
 
+                var columns = new List<string> { primaryKey, nameAttribute };
+                if (extraColumns != null)
+                {
+                    columns.AddRange(extraColumns);
+                }
+
                 var query = new QueryExpression(entityLogicalName)
                 {
-                    ColumnSet = new ColumnSet(primaryKey, nameAttribute),
+                    ColumnSet = new ColumnSet(columns.ToArray()),
                     Criteria = new FilterExpression()
                 };
                 query.Criteria.AddCondition(primaryKey, ConditionOperator.In, ids);
 
-                var lookup = service.RetrieveMultiple(query).Entities
-                    .ToDictionary(e => e.Id, e => e.GetAttributeValue<string>(nameAttribute));
+                var lookup = service.RetrieveMultiple(query).Entities.ToDictionary(e => e.Id);
 
                 foreach (var item in batch)
                 {
-                    if (lookup.TryGetValue(item.ObjectId, out var name) && !string.IsNullOrEmpty(name))
+                    if (!lookup.TryGetValue(item.ObjectId, out var entity))
+                    {
+                        continue;
+                    }
+
+                    var name = entity.GetAttributeValue<string>(nameAttribute);
+                    if (!string.IsNullOrEmpty(name))
                     {
                         item.DisplayName = name;
                     }
+
+                    applyExtra?.Invoke(item, entity);
                 }
             }
         }

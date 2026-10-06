@@ -19,6 +19,10 @@ namespace SolutionComponentCloner.Services
         private readonly Dictionary<Guid, string> _relationships = new Dictionary<Guid, string>();
         private readonly Dictionary<Guid, string> _keys = new Dictionary<Guid, string>();
         private readonly Dictionary<Guid, string> _optionSets = new Dictionary<Guid, string>();
+        private readonly Dictionary<Guid, string> _entityLogicalNames = new Dictionary<Guid, string>();
+        private readonly Dictionary<Guid, string> _attributeTables = new Dictionary<Guid, string>();
+        private readonly Dictionary<Guid, string> _keyTables = new Dictionary<Guid, string>();
+        private readonly Dictionary<Guid, string> _relationshipTables = new Dictionary<Guid, string>();
         private readonly Dictionary<string, EntityMetadata> _entitiesByLogicalName = new Dictionary<string, EntityMetadata>(StringComparer.OrdinalIgnoreCase);
         private bool _entityMetadataLoaded;
         private bool _optionSetMetadataLoaded;
@@ -63,6 +67,37 @@ namespace SolutionComponentCloner.Services
             return _keys.TryGetValue(metadataId, out var name) ? name : null;
         }
 
+        public string GetEntityLogicalName(IOrganizationService service, Guid metadataId)
+        {
+            EnsureEntityMetadata(service);
+            return _entityLogicalNames.TryGetValue(metadataId, out var name) ? name : null;
+        }
+
+        public string GetAttributeTable(IOrganizationService service, Guid metadataId)
+        {
+            EnsureEntityMetadata(service);
+            return _attributeTables.TryGetValue(metadataId, out var table) ? table : null;
+        }
+
+        public string GetEntityKeyTable(IOrganizationService service, Guid metadataId)
+        {
+            EnsureEntityMetadata(service);
+            return _keyTables.TryGetValue(metadataId, out var table) ? table : null;
+        }
+
+        public string GetRelationshipTable(IOrganizationService service, Guid metadataId)
+        {
+            EnsureEntityMetadata(service);
+            return _relationshipTables.TryGetValue(metadataId, out var table) ? table : null;
+        }
+
+        /// <summary>The "Display name (logicalname)" label for a table, or just the logical name if its metadata is unknown.</summary>
+        public string GetEntityLabel(IOrganizationService service, string logicalName)
+        {
+            var metadata = GetEntityMetadataByLogicalName(service, logicalName);
+            return metadata == null ? logicalName : FormatLabel(metadata.DisplayName, metadata.LogicalName);
+        }
+
         public string GetOptionSetName(IOrganizationService service, Guid metadataId)
         {
             EnsureOptionSetMetadata(service);
@@ -89,6 +124,7 @@ namespace SolutionComponentCloner.Services
                 if (entity.MetadataId.HasValue)
                 {
                     _entities[entity.MetadataId.Value] = FormatLabel(entity.DisplayName, entity.LogicalName);
+                    _entityLogicalNames[entity.MetadataId.Value] = entity.LogicalName;
                 }
 
                 if (!string.IsNullOrEmpty(entity.LogicalName))
@@ -102,8 +138,8 @@ namespace SolutionComponentCloner.Services
                     {
                         if (attribute.MetadataId.HasValue)
                         {
-                            _attributes[attribute.MetadataId.Value] =
-                                $"{entity.LogicalName}.{FormatLabel(attribute.DisplayName, attribute.LogicalName)}";
+                            _attributes[attribute.MetadataId.Value] = FormatLabel(attribute.DisplayName, attribute.LogicalName);
+                            _attributeTables[attribute.MetadataId.Value] = entity.LogicalName;
                         }
                     }
                 }
@@ -114,20 +150,21 @@ namespace SolutionComponentCloner.Services
                     {
                         if (key.MetadataId.HasValue)
                         {
-                            _keys[key.MetadataId.Value] = $"{entity.LogicalName}.{FormatLabel(key.DisplayName, key.LogicalName)}";
+                            _keys[key.MetadataId.Value] = FormatLabel(key.DisplayName, key.LogicalName);
+                            _keyTables[key.MetadataId.Value] = entity.LogicalName;
                         }
                     }
                 }
 
-                AddRelationships(entity.OneToManyRelationships);
-                AddRelationships(entity.ManyToOneRelationships);
-                AddRelationships(entity.ManyToManyRelationships);
+                AddRelationships(entity.OneToManyRelationships, entity.LogicalName);
+                AddRelationships(entity.ManyToOneRelationships, entity.LogicalName);
+                AddRelationships(entity.ManyToManyRelationships, entity.LogicalName);
             }
 
             _entityMetadataLoaded = true;
         }
 
-        private void AddRelationships(RelationshipMetadataBase[] relationships)
+        private void AddRelationships(RelationshipMetadataBase[] relationships, string fallbackTable)
         {
             if (relationships == null)
             {
@@ -139,6 +176,23 @@ namespace SolutionComponentCloner.Services
                 if (relationship.MetadataId.HasValue)
                 {
                     _relationships[relationship.MetadataId.Value] = relationship.SchemaName;
+
+                    // A relationship is filed under the table that holds the lookup (1:N), or the first table of an N:N.
+                    string table;
+                    if (relationship is OneToManyRelationshipMetadata oneToMany)
+                    {
+                        table = oneToMany.ReferencingEntity;
+                    }
+                    else if (relationship is ManyToManyRelationshipMetadata manyToMany)
+                    {
+                        table = manyToMany.Entity1LogicalName;
+                    }
+                    else
+                    {
+                        table = fallbackTable;
+                    }
+
+                    _relationshipTables[relationship.MetadataId.Value] = string.IsNullOrEmpty(table) ? fallbackTable : table;
                 }
             }
         }
