@@ -3,7 +3,7 @@
 An [XrmToolBox](https://www.xrmtoolbox.com/) tool that copies components from one Dataverse / Dynamics 365
 solution into another, browsing the source solution the way the Power Apps solution explorer does.
 
-![Choose a source and a target solution](docs/screenshots/1-select-solutions.png)
+![Choose a source and a target solution](https://raw.githubusercontent.com/abdelkayoumd/SolutionComponentCloner/main/docs/screenshots/1-select-solutions.png)
 
 ## Features
 
@@ -27,11 +27,11 @@ solution into another, browsing the source solution the way the Power Apps solut
 
 **Browse the tree and tick what to copy**
 
-![Components grouped by type, with a table expanded](docs/screenshots/2-components-tree.png)
+![Components grouped by type, with a table expanded](https://raw.githubusercontent.com/abdelkayoumd/SolutionComponentCloner/main/docs/screenshots/2-components-tree.png)
 
 **Review the results**
 
-![Copy results with a failure banner and details](docs/screenshots/3-copy-results.png)
+![Copy results with a failure banner and details](https://raw.githubusercontent.com/abdelkayoumd/SolutionComponentCloner/main/docs/screenshots/3-copy-results.png)
 
 ## Install
 
@@ -41,4 +41,4 @@ solution into another, browsing the source solution the way the Power Apps solut
 
 ## License
 
-[MIT](LICENSE) © 2026 abdelkayoumd
+[MIT](https://github.com/abdelkayoumd/SolutionComponentCloner/blob/main/LICENSE) © 2026 abdelkayoumd
