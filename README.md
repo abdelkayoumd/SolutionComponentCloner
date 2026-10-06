@@ -53,8 +53,8 @@ Follows the [official guide](https://www.xrmtoolbox.com/documentation/for-develo
 2. Commit and push, then tag the release: `git tag v1.0.1` and `git push origin v1.0.1`. The
    `release` workflow checks the tag matches the versions above, runs the tests, builds the package,
    creates a GitHub release with the `.nupkg` and DLL attached, and pushes the package to nuget.org.
-   The nuget.org push needs a `NUGET_API_KEY` repository secret (Settings, Secrets and variables,
-   Actions); without it the workflow skips that step and the package stays on the GitHub release.
+   The nuget.org push uses Trusted Publishing, so no API key is stored: nuget.org has a policy
+   trusting this repository's `release.yml` workflow (nuget.org, your name, Trusted Publishing).
    To build the package locally instead:
    `dotnet pack SolutionComponentCloner/SolutionComponentCloner.csproj -c Release -o nupkg`.
 3. The first time only: wait for nuget.org to index the package, then register the tool at
