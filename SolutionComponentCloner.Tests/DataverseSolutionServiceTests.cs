@@ -86,6 +86,31 @@ namespace SolutionComponentCloner.Tests
             Assert.Equal("cookie-2", ((QueryExpression)fake.Queries[2]).PageInfo.PagingCookie);
         }
 
+        [Fact]
+        public void GetSolutions_AsksForTheNewestSolutionFirst()
+        {
+            var fake = new FakeOrganizationService();
+            var older = NewSolution("Older");
+            older["createdon"] = new DateTime(2024, 1, 1);
+            var newer = NewSolution("Newer");
+            newer["createdon"] = new DateTime(2026, 5, 1);
+            fake.OnRetrieveMultiple = q =>
+            {
+                var collection = new EntityCollection();
+                collection.Entities.Add(newer);
+                collection.Entities.Add(older);
+                return collection;
+            };
+
+            var solutions = _service.GetSolutions(fake);
+
+            var orders = ((QueryExpression)fake.Queries[0]).Orders;
+            Assert.Equal("createdon", orders[0].AttributeName);
+            Assert.Equal(OrderType.Descending, orders[0].OrderType);
+            Assert.Equal(new[] { "Newer", "Older" }, solutions.Select(s => s.FriendlyName));
+            Assert.Equal(new DateTime(2026, 5, 1), solutions[0].CreatedOn);
+        }
+
         private static Entity NewSolution(string name)
         {
             var entity = new Entity("solution", Guid.NewGuid());

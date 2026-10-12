@@ -17,9 +17,13 @@ namespace SolutionComponentCloner.Services
         {
             var query = new QueryExpression("solution")
             {
-                ColumnSet = new ColumnSet("solutionid", "uniquename", "friendlyname", "ismanaged", "version"),
+                ColumnSet = new ColumnSet("solutionid", "uniquename", "friendlyname", "ismanaged", "version", "createdon"),
                 Criteria = new FilterExpression(),
-                Orders = { new OrderExpression("friendlyname", OrderType.Ascending) }
+                Orders =
+                {
+                    new OrderExpression("createdon", OrderType.Descending),
+                    new OrderExpression("friendlyname", OrderType.Ascending)
+                }
             };
             query.Criteria.AddCondition("isvisible", ConditionOperator.Equal, true);
 
@@ -29,6 +33,7 @@ namespace SolutionComponentCloner.Services
                     SolutionId = e.Id,
                     UniqueName = e.GetAttributeValue<string>("uniquename"),
                     FriendlyName = e.GetAttributeValue<string>("friendlyname"),
+                    CreatedOn = e.GetAttributeValue<DateTime?>("createdon"),
                     IsManaged = e.GetAttributeValue<bool>("ismanaged"),
                     Version = e.GetAttributeValue<string>("version")
                 })

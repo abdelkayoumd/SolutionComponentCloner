@@ -9,6 +9,7 @@ namespace SolutionComponentCloner.Models
         public string FriendlyName { get; set; }
         public bool IsManaged { get; set; }
         public string Version { get; set; }
+        public DateTime? CreatedOn { get; set; }
 
         public override string ToString()
         {
