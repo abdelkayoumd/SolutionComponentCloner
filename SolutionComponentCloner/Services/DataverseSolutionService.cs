@@ -40,9 +40,10 @@ namespace SolutionComponentCloner.Services
                 .ToList();
         }
 
-        public SolutionComponentLoadResult GetSolutionComponents(IOrganizationService service, Guid solutionId)
+        public SolutionComponentLoadResult GetSolutionComponents(IOrganizationService service, Guid solutionId, Action<string> progress = null)
         {
             var loadResult = new SolutionComponentLoadResult();
+            progress?.Invoke("Reading the solution's components...");
 
             var query = new QueryExpression("solutioncomponent")
             {
@@ -59,8 +60,11 @@ namespace SolutionComponentCloner.Services
                 })
                 .ToList();
 
-            foreach (var group in rows.GroupBy(r => r.ComponentType))
+            var groups = rows.GroupBy(r => r.ComponentType).ToList();
+            for (var i = 0; i < groups.Count; i++)
             {
+                var group = groups[i];
+                progress?.Invoke($"Resolving names: {ComponentTypeCatalog.GetGroupName(group.Key, null)} ({group.Count()}), type {i + 1} of {groups.Count}...");
                 ResolveDisplayNames(service, group.Key, group.ToList(), loadResult.Warnings);
             }
 
@@ -186,6 +190,20 @@ namespace SolutionComponentCloner.Services
 
         private void ResolveMetadataBackedNames(IOrganizationService service, int componentType, List<SolutionComponentItem> items)
         {
+            // Fetch only the columns, relationships or keys this solution actually contains.
+            switch (componentType)
+            {
+                case ComponentTypeCatalog.Attribute:
+                    _metadataCache.PrefetchAttributes(service, items.Select(i => i.ObjectId));
+                    break;
+                case ComponentTypeCatalog.Relationship:
+                    _metadataCache.PrefetchRelationships(service, items.Select(i => i.ObjectId));
+                    break;
+                case ComponentTypeCatalog.EntityKey:
+                    _metadataCache.PrefetchKeys(service);
+                    break;
+            }
+
             foreach (var item in items)
             {
                 switch (componentType)
@@ -196,18 +214,18 @@ namespace SolutionComponentCloner.Services
                         item.TableLabel = item.DisplayName;
                         break;
                     case ComponentTypeCatalog.Attribute:
-                        item.DisplayName = _metadataCache.GetAttributeName(service, item.ObjectId);
-                        item.TableName = _metadataCache.GetAttributeTable(service, item.ObjectId);
+                        item.DisplayName = _metadataCache.GetAttributeName(item.ObjectId);
+                        item.TableName = _metadataCache.GetAttributeTable(item.ObjectId);
                         item.Category = "Columns";
                         break;
                     case ComponentTypeCatalog.Relationship:
-                        item.DisplayName = _metadataCache.GetRelationshipName(service, item.ObjectId);
-                        item.TableName = _metadataCache.GetRelationshipTable(service, item.ObjectId);
+                        item.DisplayName = _metadataCache.GetRelationshipName(item.ObjectId);
+                        item.TableName = _metadataCache.GetRelationshipTable(item.ObjectId);
                         item.Category = "Relationships";
                         break;
                     case ComponentTypeCatalog.EntityKey:
-                        item.DisplayName = _metadataCache.GetEntityKeyName(service, item.ObjectId);
-                        item.TableName = _metadataCache.GetEntityKeyTable(service, item.ObjectId);
+                        item.DisplayName = _metadataCache.GetEntityKeyName(item.ObjectId);
+                        item.TableName = _metadataCache.GetEntityKeyTable(item.ObjectId);
                         item.Category = "Keys";
                         break;
                     case ComponentTypeCatalog.OptionSet:

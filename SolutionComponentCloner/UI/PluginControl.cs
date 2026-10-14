@@ -589,8 +589,9 @@ namespace SolutionComponentCloner.UI
                 Message = $"Loading components from {source.FriendlyName}...",
                 Work = (worker, args) =>
                 {
-                    args.Result = _dataService.GetSolutionComponents(Service, source.SolutionId);
+                    args.Result = _dataService.GetSolutionComponents(Service, source.SolutionId, message => worker.ReportProgress(0, message));
                 },
+                ProgressChanged = e => SetWorkingMessage(e.UserState as string),
                 PostWorkCallBack = args =>
                 {
                     if (args.Error != null)

@@ -1,16 +1,18 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Metadata;
+using Microsoft.Xrm.Sdk.Metadata.Query;
+using Microsoft.Xrm.Sdk.Query;
 
 namespace SolutionComponentCloner.Services
 {
     /// <summary>
-    /// Lazily loads and caches metadata-derived display names (entities, attributes,
-    /// relationships, keys, global option sets) for a single connection/session, since a
-    /// full metadata pull is expensive and the same organization is queried repeatedly
-    /// while the user switches between source/target solutions.
+    /// Lazily loads and caches metadata-derived names (tables, columns, relationships, keys, global option
+    /// sets) for a single connection/session. Table names come from a light table-only download; columns,
+    /// relationships and keys are fetched only for the ids a solution actually contains.
     /// </summary>
     internal sealed class MetadataNameCache
     {
@@ -24,19 +26,26 @@ namespace SolutionComponentCloner.Services
         private readonly Dictionary<Guid, string> _keyTables = new Dictionary<Guid, string>();
         private readonly Dictionary<Guid, string> _relationshipTables = new Dictionary<Guid, string>();
         private readonly Dictionary<string, EntityMetadata> _entitiesByLogicalName = new Dictionary<string, EntityMetadata>(StringComparer.OrdinalIgnoreCase);
-        private bool _entityMetadataLoaded;
+        private bool _entitiesLoaded;
+        private bool _fullMetadataLoaded;
+        private bool _keysLoaded;
         private bool _optionSetMetadataLoaded;
 
         public string GetEntityName(IOrganizationService service, Guid metadataId)
         {
-            EnsureEntityMetadata(service);
+            EnsureEntities(service);
             return _entities.TryGetValue(metadataId, out var name) ? name : null;
         }
 
+        public string GetEntityLogicalName(IOrganizationService service, Guid metadataId)
+        {
+            EnsureEntities(service);
+            return _entityLogicalNames.TryGetValue(metadataId, out var name) ? name : null;
+        }
+
         /// <summary>
-        /// Looks up an entity's metadata (primary id/name attributes, etc.) by logical name,
-        /// e.g. to resolve instance names for a custom/ISV component type that isn't in
-        /// <see cref="ComponentTypeCatalog"/>.
+        /// Looks up a table's metadata (primary id/name attributes, etc.) by logical name, e.g. to resolve
+        /// instance names for a custom/ISV component type that isn't in <see cref="ComponentTypeCatalog"/>.
         /// </summary>
         public EntityMetadata GetEntityMetadataByLogicalName(IOrganizationService service, string logicalName)
         {
@@ -45,50 +54,8 @@ namespace SolutionComponentCloner.Services
                 return null;
             }
 
-            EnsureEntityMetadata(service);
+            EnsureEntities(service);
             return _entitiesByLogicalName.TryGetValue(logicalName, out var metadata) ? metadata : null;
-        }
-
-        public string GetAttributeName(IOrganizationService service, Guid metadataId)
-        {
-            EnsureEntityMetadata(service);
-            return _attributes.TryGetValue(metadataId, out var name) ? name : null;
-        }
-
-        public string GetRelationshipName(IOrganizationService service, Guid metadataId)
-        {
-            EnsureEntityMetadata(service);
-            return _relationships.TryGetValue(metadataId, out var name) ? name : null;
-        }
-
-        public string GetEntityKeyName(IOrganizationService service, Guid metadataId)
-        {
-            EnsureEntityMetadata(service);
-            return _keys.TryGetValue(metadataId, out var name) ? name : null;
-        }
-
-        public string GetEntityLogicalName(IOrganizationService service, Guid metadataId)
-        {
-            EnsureEntityMetadata(service);
-            return _entityLogicalNames.TryGetValue(metadataId, out var name) ? name : null;
-        }
-
-        public string GetAttributeTable(IOrganizationService service, Guid metadataId)
-        {
-            EnsureEntityMetadata(service);
-            return _attributeTables.TryGetValue(metadataId, out var table) ? table : null;
-        }
-
-        public string GetEntityKeyTable(IOrganizationService service, Guid metadataId)
-        {
-            EnsureEntityMetadata(service);
-            return _keyTables.TryGetValue(metadataId, out var table) ? table : null;
-        }
-
-        public string GetRelationshipTable(IOrganizationService service, Guid metadataId)
-        {
-            EnsureEntityMetadata(service);
-            return _relationshipTables.TryGetValue(metadataId, out var table) ? table : null;
         }
 
         /// <summary>The "Display name (logicalname)" label for a table, or just the logical name if its metadata is unknown.</summary>
@@ -98,19 +65,137 @@ namespace SolutionComponentCloner.Services
             return metadata == null ? logicalName : FormatLabel(metadata.DisplayName, metadata.LogicalName);
         }
 
+        public string GetAttributeName(Guid metadataId) => _attributes.TryGetValue(metadataId, out var name) ? name : null;
+
+        public string GetAttributeTable(Guid metadataId) => _attributeTables.TryGetValue(metadataId, out var table) ? table : null;
+
+        public string GetRelationshipName(Guid metadataId) => _relationships.TryGetValue(metadataId, out var name) ? name : null;
+
+        public string GetRelationshipTable(Guid metadataId) => _relationshipTables.TryGetValue(metadataId, out var table) ? table : null;
+
+        public string GetEntityKeyName(Guid metadataId) => _keys.TryGetValue(metadataId, out var name) ? name : null;
+
+        public string GetEntityKeyTable(Guid metadataId) => _keyTables.TryGetValue(metadataId, out var table) ? table : null;
+
         public string GetOptionSetName(IOrganizationService service, Guid metadataId)
         {
             EnsureOptionSetMetadata(service);
             return _optionSets.TryGetValue(metadataId, out var name) ? name : null;
         }
 
-        private void EnsureEntityMetadata(IOrganizationService service)
+        public void PrefetchAttributes(IOrganizationService service, IEnumerable<Guid> ids)
         {
-            if (_entityMetadataLoaded)
+            var missing = ids.Where(id => !_attributes.ContainsKey(id)).Distinct().ToArray();
+            if (missing.Length > 0)
+            {
+                LoadDetails(service, missing, attributes: true, relationships: false, keys: false);
+            }
+        }
+
+        public void PrefetchRelationships(IOrganizationService service, IEnumerable<Guid> ids)
+        {
+            var missing = ids.Where(id => !_relationships.ContainsKey(id)).Distinct().ToArray();
+            if (missing.Length > 0)
+            {
+                LoadDetails(service, missing, attributes: false, relationships: true, keys: false);
+            }
+        }
+
+        public void PrefetchKeys(IOrganizationService service)
+        {
+            if (!_keysLoaded)
+            {
+                LoadDetails(service, new Guid[0], attributes: false, relationships: false, keys: true);
+            }
+        }
+
+        private void EnsureEntities(IOrganizationService service)
+        {
+            if (_entitiesLoaded)
             {
                 return;
             }
 
+            var request = new RetrieveAllEntitiesRequest
+            {
+                EntityFilters = EntityFilters.Entity,
+                RetrieveAsIfPublished = true
+            };
+
+            var response = (RetrieveAllEntitiesResponse)service.Execute(request);
+            foreach (var entity in response.EntityMetadata)
+            {
+                AbsorbEntityBasics(entity);
+            }
+
+            _entitiesLoaded = true;
+        }
+
+        private void LoadDetails(IOrganizationService service, Guid[] ids, bool attributes, bool relationships, bool keys)
+        {
+            if (_fullMetadataLoaded)
+            {
+                return;
+            }
+
+            try
+            {
+                var query = new EntityQueryExpression { Properties = new MetadataPropertiesExpression("LogicalName") };
+
+                if (attributes)
+                {
+                    query.Properties.PropertyNames.Add("Attributes");
+                    query.AttributeQuery = new AttributeQueryExpression
+                    {
+                        Criteria = IdFilter(ids),
+                        Properties = new MetadataPropertiesExpression("LogicalName", "DisplayName", "MetadataId")
+                    };
+                }
+
+                if (relationships)
+                {
+                    query.Properties.PropertyNames.Add("OneToManyRelationships");
+                    query.Properties.PropertyNames.Add("ManyToOneRelationships");
+                    query.Properties.PropertyNames.Add("ManyToManyRelationships");
+                    query.RelationshipQuery = new RelationshipQueryExpression
+                    {
+                        Criteria = IdFilter(ids),
+                        Properties = new MetadataPropertiesExpression("SchemaName", "MetadataId", "ReferencingEntity", "Entity1LogicalName")
+                    };
+                }
+
+                if (keys)
+                {
+                    query.Properties.PropertyNames.Add("Keys");
+                }
+
+                var response = (RetrieveMetadataChangesResponse)service.Execute(new RetrieveMetadataChangesRequest { Query = query });
+                foreach (var entity in response.EntityMetadata)
+                {
+                    AbsorbEntityDetails(entity);
+                }
+
+                if (keys)
+                {
+                    _keysLoaded = true;
+                }
+            }
+            catch (Exception)
+            {
+                // The targeted call is an optimisation; if the organization rejects it, fall back to the full download.
+                LoadFullMetadata(service);
+            }
+        }
+
+        private static MetadataFilterExpression IdFilter(Guid[] ids)
+        {
+            var filter = new MetadataFilterExpression(LogicalOperator.And);
+            filter.Conditions.Add(new MetadataConditionExpression("MetadataId", MetadataConditionOperator.In, ids));
+            return filter;
+        }
+
+        private void LoadFullMetadata(IOrganizationService service)
+        {
             var request = new RetrieveAllEntitiesRequest
             {
                 EntityFilters = EntityFilters.Entity | EntityFilters.Attributes | EntityFilters.Relationships,
@@ -118,50 +203,60 @@ namespace SolutionComponentCloner.Services
             };
 
             var response = (RetrieveAllEntitiesResponse)service.Execute(request);
-
             foreach (var entity in response.EntityMetadata)
             {
-                if (entity.MetadataId.HasValue)
-                {
-                    _entities[entity.MetadataId.Value] = FormatLabel(entity.DisplayName, entity.LogicalName);
-                    _entityLogicalNames[entity.MetadataId.Value] = entity.LogicalName;
-                }
-
-                if (!string.IsNullOrEmpty(entity.LogicalName))
-                {
-                    _entitiesByLogicalName[entity.LogicalName] = entity;
-                }
-
-                if (entity.Attributes != null)
-                {
-                    foreach (var attribute in entity.Attributes)
-                    {
-                        if (attribute.MetadataId.HasValue)
-                        {
-                            _attributes[attribute.MetadataId.Value] = FormatLabel(attribute.DisplayName, attribute.LogicalName);
-                            _attributeTables[attribute.MetadataId.Value] = entity.LogicalName;
-                        }
-                    }
-                }
-
-                if (entity.Keys != null)
-                {
-                    foreach (var key in entity.Keys)
-                    {
-                        if (key.MetadataId.HasValue)
-                        {
-                            _keys[key.MetadataId.Value] = FormatLabel(key.DisplayName, key.LogicalName);
-                            _keyTables[key.MetadataId.Value] = entity.LogicalName;
-                        }
-                    }
-                }
-
-                AddRelationships(entity.OneToManyRelationships, entity.LogicalName);
-                AddRelationships(entity.ManyToOneRelationships, entity.LogicalName);
-                AddRelationships(entity.ManyToManyRelationships, entity.LogicalName);
+                AbsorbEntityBasics(entity);
+                AbsorbEntityDetails(entity);
             }
 
-            _entityMetadataLoaded = true;
+            _entitiesLoaded = true;
+            _fullMetadataLoaded = true;
+            _keysLoaded = true;
+        }
+
+        private void AbsorbEntityBasics(EntityMetadata entity)
+        {
+            if (entity.MetadataId.HasValue)
+            {
+                _entities[entity.MetadataId.Value] = FormatLabel(entity.DisplayName, entity.LogicalName);
+                _entityLogicalNames[entity.MetadataId.Value] = entity.LogicalName;
+            }
+
+            if (!string.IsNullOrEmpty(entity.LogicalName))
+            {
+                _entitiesByLogicalName[entity.LogicalName] = entity;
+            }
+        }
+
+        private void AbsorbEntityDetails(EntityMetadata entity)
+        {
+            if (entity.Attributes != null)
+            {
+                foreach (var attribute in entity.Attributes)
+                {
+                    if (attribute.MetadataId.HasValue)
+                    {
+                        _attributes[attribute.MetadataId.Value] = FormatLabel(attribute.DisplayName, attribute.LogicalName);
+                        _attributeTables[attribute.MetadataId.Value] = entity.LogicalName;
+                    }
+                }
+            }
+
+            if (entity.Keys != null)
+            {
+                foreach (var key in entity.Keys)
+                {
+                    if (key.MetadataId.HasValue)
+                    {
+                        _keys[key.MetadataId.Value] = FormatLabel(key.DisplayName, key.LogicalName);
+                        _keyTables[key.MetadataId.Value] = entity.LogicalName;
+                    }
+                }
+            }
+
+            AddRelationships(entity.OneToManyRelationships, entity.LogicalName);
+            AddRelationships(entity.ManyToOneRelationships, entity.LogicalName);
+            AddRelationships(entity.ManyToManyRelationships, entity.LogicalName);
         }
 
         private void AddRelationships(RelationshipMetadataBase[] relationships, string fallbackTable)

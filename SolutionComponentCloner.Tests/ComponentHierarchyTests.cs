@@ -38,7 +38,7 @@ namespace SolutionComponentCloner.Tests
             return new FakeOrganizationService
             {
                 OnExecute = r => r is RetrieveAllEntitiesRequest
-                    ? new RetrieveAllEntitiesResponse { Results = new ParameterCollection { { "EntityMetadata", new EntityMetadataCollection() } } }
+                    ? new RetrieveAllEntitiesResponse { Results = new ParameterCollection { { "EntityMetadata", new EntityMetadata[0] } } }
                     : new OrganizationResponse(),
                 OnRetrieveMultiple = q =>
                 {
