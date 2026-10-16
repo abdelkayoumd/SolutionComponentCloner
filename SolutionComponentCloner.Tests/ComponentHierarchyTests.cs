@@ -147,6 +147,40 @@ namespace SolutionComponentCloner.Tests
             Assert.Equal("Processes", process.GroupName);
         }
 
+        [Theory]
+        [InlineData(5, "Cloud flows", "Cloud Flow")]
+        [InlineData(6, "Desktop flows", "Desktop Flow")]
+        [InlineData(4, "Business process flows", "Business Process Flow")]
+        [InlineData(3, "Actions", "Action")]
+        [InlineData(0, "Processes", "Process / Workflow")]
+        public void WorkflowCategoryDecidesTheFolder(int category, string expectedGroup, string expectedTypeName)
+        {
+            var id = Guid.NewGuid();
+            var item = Load(new Dictionary<string, List<Entity>>
+            {
+                ["solutioncomponent"] = new List<Entity> { SolutionComponent(id, 29) },
+                ["workflow"] = new List<Entity> { Row("workflow", id, "name", "My flow", ("primaryentity", "none"), ("category", new OptionSetValue(category))) }
+            }, id);
+
+            Assert.Equal(expectedGroup, item.GroupName);
+            Assert.Equal(expectedTypeName, item.ComponentTypeName);
+            Assert.Null(item.TableName);
+        }
+
+        [Fact]
+        public void CanvasAppIsNamedFromItsDisplayNameColumn()
+        {
+            var id = Guid.NewGuid();
+            var item = Load(new Dictionary<string, List<Entity>>
+            {
+                ["solutioncomponent"] = new List<Entity> { SolutionComponent(id, 300) },
+                ["canvasapp"] = new List<Entity> { Row("canvasapp", id, "displayname", "Inventory Tracker") }
+            }, id);
+
+            Assert.Equal("Inventory Tracker", item.DisplayName);
+            Assert.Equal("Canvas apps", item.GroupName);
+        }
+
         [Fact]
         public void ComponentTypesWithoutHierarchyUseTheirPluralGroupName()
         {

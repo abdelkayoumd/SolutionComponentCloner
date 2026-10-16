@@ -261,9 +261,19 @@ namespace SolutionComponentCloner.Services
                     extraColumns = new[] { "primaryentity", "category" };
                     return (item, e) =>
                     {
-                        if (e.GetAttributeValue<OptionSetValue>("category")?.Value == 2)
+                        var category = e.GetAttributeValue<OptionSetValue>("category")?.Value;
+                        if (category == 2)
                         {
                             Place(item, e.GetAttributeValue<string>("primaryentity"), "Business rules", null);
+                            return;
+                        }
+
+                        // Cloud flows, desktop flows and the like live in the workflow table; the category tells them apart.
+                        var kind = WorkflowKind(category);
+                        if (kind != null)
+                        {
+                            item.GroupName = kind.Value.Group;
+                            item.ComponentTypeName = kind.Value.Name;
                         }
                     };
                 case ComponentTypeCatalog.WebResource:
@@ -276,6 +286,19 @@ namespace SolutionComponentCloner.Services
                 default:
                     extraColumns = null;
                     return null;
+            }
+        }
+
+        /// <summary>Maps a workflow row's category to its maker-portal folder and type name; null keeps it under "Processes".</summary>
+        private static (string Group, string Name)? WorkflowKind(int? category)
+        {
+            switch (category)
+            {
+                case 3: return ("Actions", "Action");
+                case 4: return ("Business process flows", "Business Process Flow");
+                case 5: return ("Cloud flows", "Cloud Flow");
+                case 6: return ("Desktop flows", "Desktop Flow");
+                default: return null;
             }
         }
 

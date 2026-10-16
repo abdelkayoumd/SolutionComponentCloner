@@ -39,7 +39,6 @@ namespace SolutionComponentCloner.Services
             { OptionSet, new ComponentTypeDefinition("Option Set", null, null) },
             { Relationship, new ComponentTypeDefinition("Entity Relationship", null, null) },
             { EntityKey, new ComponentTypeDefinition("Entity Key", null, null) },
-            { 18, new ComponentTypeDefinition("Queue", "queue", "name") },
             { 20, new ComponentTypeDefinition("Security Role", "role", "name") },
             { 26, new ComponentTypeDefinition("View", "savedquery", "name") },
             { 29, new ComponentTypeDefinition("Process / Workflow", "workflow", "name") },
@@ -51,24 +50,26 @@ namespace SolutionComponentCloner.Services
             { 61, new ComponentTypeDefinition("Web Resource", "webresource", "name") },
             { 62, new ComponentTypeDefinition("Site Map", "sitemap", "sitemapnameunique") },
             { 63, new ComponentTypeDefinition("Connection Role", "connectionrole", "name") },
-            { 65, new ComponentTypeDefinition("Field Security Profile", "fieldsecurityprofile", "name") },
-            { 68, new ComponentTypeDefinition("Plug-in Type", "plugintype", "name") },
-            { 69, new ComponentTypeDefinition("Plug-in Assembly", "pluginassembly", "name") },
-            { 70, new ComponentTypeDefinition("SDK Message Processing Step", "sdkmessageprocessingstep", "name") },
-            { 71, new ComponentTypeDefinition("SDK Message Processing Step Image", "sdkmessageprocessingstepimage", "name") },
-            { 72, new ComponentTypeDefinition("Service Endpoint", "serviceendpoint", "name") },
+            { 66, new ComponentTypeDefinition("Custom Control", "customcontrol", "name") },
+            { 70, new ComponentTypeDefinition("Field Security Profile", "fieldsecurityprofile", "name") },
+            { 90, new ComponentTypeDefinition("Plug-in Type", "plugintype", "name") },
+            { 91, new ComponentTypeDefinition("Plug-in Assembly", "pluginassembly", "name") },
+            { 92, new ComponentTypeDefinition("SDK Message Processing Step", "sdkmessageprocessingstep", "name") },
+            { 93, new ComponentTypeDefinition("SDK Message Processing Step Image", "sdkmessageprocessingstepimage", "name") },
+            { 95, new ComponentTypeDefinition("Service Endpoint", "serviceendpoint", "name") },
             // A whole Model-Driven App. Its AppModuleComponents list every entity/form/view/
             // process the app is built from — copying this component always brings all of
             // those along, since they're the app's own definition, not optional dependencies
-            // AddRequiredComponents can skip.
+            // AddRequiredComponents can skip. (80 is not in Microsoft's published componenttype
+            // list but is what Dataverse stores for an app module.)
             { ModelDrivenApp, new ComponentTypeDefinition("Model-Driven App", "appmodule", "name") },
-            { 92, new ComponentTypeDefinition("SLA", "sla", "name") },
-            { 150, new ComponentTypeDefinition("Mobile Offline Profile", "mobileofflineprofile", "name") },
-            { 152, new ComponentTypeDefinition("Similarity Rule", "similarityrule", "name") },
-            { 154, new ComponentTypeDefinition("Custom Control", "customcontrol", "name") },
-            { 201, new ComponentTypeDefinition("Custom API", "customapi", "name") },
-            { 202, new ComponentTypeDefinition("Custom API Request Parameter", "customapirequestparameter", "name") },
-            { 203, new ComponentTypeDefinition("Custom API Response Property", "customapiresponseproperty", "name") },
+            { 152, new ComponentTypeDefinition("SLA", "sla", "name") },
+            { 161, new ComponentTypeDefinition("Mobile Offline Profile", "mobileofflineprofile", "name") },
+            { 165, new ComponentTypeDefinition("Similarity Rule", "similarityrule", "name") },
+            { 300, new ComponentTypeDefinition("Canvas App", "canvasapp", "displayname") },
+            { 371, new ComponentTypeDefinition("Connector", "connector", "displayname") },
+            { 372, new ComponentTypeDefinition("Connector", "connector", "displayname") },
+            { 380, new ComponentTypeDefinition("Environment Variable Definition", "environmentvariabledefinition", "displayname") },
         };
 
         // Most Dataverse tables key on "{logicalname}id", but a handful of long-standing
@@ -88,13 +89,14 @@ namespace SolutionComponentCloner.Services
         private static readonly Dictionary<int, string> GroupNames = new Dictionary<int, string>
         {
             { 1, TablesGroup }, { 2, "Columns" }, { 9, "Option sets" }, { 10, "Relationships" }, { 14, "Keys" },
-            { 18, "Queues" }, { 20, "Security roles" }, { 26, "Views" }, { 29, "Processes" }, { 31, "Reports" },
+            { 20, "Security roles" }, { 26, "Views" }, { 29, "Processes" }, { 31, "Reports" },
             { 36, "Email templates" }, { 44, "Duplicate detection rules" }, { 59, "Charts" }, { 60, "Forms" },
-            { 61, "Web resources" }, { 62, "Site maps" }, { 63, "Connection roles" }, { 65, "Field security profiles" },
-            { 68, "Plug-in types" }, { 69, "Plug-in assemblies" }, { 70, "Plug-in steps" }, { 71, "Plug-in step images" },
-            { 72, "Service endpoints" }, { 80, "Model-driven apps" }, { 92, "SLAs" }, { 150, "Mobile offline profiles" },
-            { 152, "Similarity rules" }, { 154, "Custom controls" }, { 201, "Custom APIs" },
-            { 202, "Custom API request parameters" }, { 203, "Custom API response properties" }
+            { 61, "Web resources" }, { 62, "Site maps" }, { 63, "Connection roles" }, { 66, "Custom controls" },
+            { 70, "Field security profiles" }, { 80, "Model-driven apps" }, { 90, "Plug-in types" },
+            { 91, "Plug-in assemblies" }, { 92, "Plug-in steps" }, { 93, "Plug-in step images" },
+            { 95, "Service endpoints" }, { 152, "SLAs" }, { 161, "Mobile offline profiles" }, { 165, "Similarity rules" },
+            { 300, "Canvas apps" }, { 371, "Connectors" }, { 372, "Connectors" },
+            { 380, "Environment variables" }, { 381, "Environment variable values" }
         };
 
         public static string GetTypeName(int componentType)
