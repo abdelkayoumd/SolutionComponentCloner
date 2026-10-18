@@ -20,8 +20,10 @@ solution into another, browsing the source solution the way the Power Apps solut
   ticked. *Preview* lists exactly which dependencies would come along, and each table can override the setting
   from its right-click menu (include all subcomponents, or only the ones you ticked).
 - **Safe, visible copying** – only unmanaged solutions are accepted as a target. Copying runs in batches with a
-  live "n of m" count and a Cancel button. Tables are copied before their columns, forms and views, and
-  Model-driven apps carry a warning because they always pull in everything they are built from.
+  live "n of m" count and a Cancel button. Tables are copied before their columns, forms and views.
+- **Heads-up on big components** – a table that is in the solution completely, with all its subcomponents, gets
+  a yellow note. Before copying, you are asked to confirm any model-driven apps (which always pull in
+  everything they are built from) and any such tables, with what will be copied for each.
 - **Clear results** – a banner summarises how many components were copied or failed, with a per-component
   list one click away. Failures can be exported to CSV.
 - **Everything around the copy** – *Publish all customizations* afterwards, *New target solution...* without

@@ -31,6 +31,15 @@ namespace SolutionComponentCloner.Models
         /// <summary>True for a managed component, false for unmanaged, null when Dataverse does not say.</summary>
         public bool? IsManaged { get; set; }
 
+        /// <summary>
+        /// How the component was added to its solution: 0 = with all subcomponents, 1 = without them, 2 = as a shell only.
+        /// Null when Dataverse does not say.
+        /// </summary>
+        public int? RootComponentBehavior { get; set; }
+
+        /// <summary>True for a table that is in its solution completely, with all of its subcomponents.</summary>
+        public bool IsAddedCompletely => ComponentType == 1 && RootComponentBehavior == 0;
+
         /// <summary>True when the same component is already in the target solution.</summary>
         public bool InTarget { get; set; }
 

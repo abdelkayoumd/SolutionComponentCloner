@@ -26,6 +26,7 @@ namespace SolutionComponentCloner.UI
         public static readonly Color DangerBackground = Color.FromArgb(253, 231, 233);
         public static readonly Color Warning = Color.FromArgb(108, 90, 0);
         public static readonly Color WarningBackground = Color.FromArgb(255, 244, 206);
+        public static readonly Color WarningBorder = Color.FromArgb(245, 225, 160);
 
         public static readonly Font FontRegular = new Font("Segoe UI", 9F);
         public static readonly Font FontSmall = new Font("Segoe UI", 8F);

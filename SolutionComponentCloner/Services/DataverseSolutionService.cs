@@ -46,23 +46,43 @@ namespace SolutionComponentCloner.Services
             var loadResult = new SolutionComponentLoadResult();
             progress?.Invoke("Reading the solution's components...");
 
-            var query = new QueryExpression("solutioncomponent")
-            {
-                ColumnSet = new ColumnSet("objectid", "componenttype"),
-                Criteria = new FilterExpression()
-            };
-            query.Criteria.AddCondition("solutionid", ConditionOperator.Equal, solutionId);
-
-            var rows = RetrieveAll(service, query)
+            var rows = ReadSolutionComponentRows(service, solutionId)
                 .Select(e => new SolutionComponentItem
                 {
                     ObjectId = e.GetAttributeValue<Guid>("objectid"),
-                    ComponentType = e.GetAttributeValue<OptionSetValue>("componenttype")?.Value ?? 0
+                    ComponentType = e.GetAttributeValue<OptionSetValue>("componenttype")?.Value ?? 0,
+                    RootComponentBehavior = e.GetAttributeValue<OptionSetValue>("rootcomponentbehavior")?.Value
                 })
                 .ToList();
 
             loadResult.Items = ResolveItems(service, rows, loadResult.Warnings, progress);
             return loadResult;
+        }
+
+        private static List<Entity> ReadSolutionComponentRows(IOrganizationService service, Guid solutionId)
+        {
+            // "rootcomponentbehavior" says whether a table was added with all its subcomponents. Older
+            // organizations may not have the column, so fall back to reading without it.
+            foreach (var columns in new[] { new[] { "objectid", "componenttype", "rootcomponentbehavior" }, new[] { "objectid", "componenttype" } })
+            {
+                var query = new QueryExpression("solutioncomponent")
+                {
+                    ColumnSet = new ColumnSet(columns),
+                    Criteria = new FilterExpression()
+                };
+                query.Criteria.AddCondition("solutionid", ConditionOperator.Equal, solutionId);
+
+                try
+                {
+                    return RetrieveAll(service, query);
+                }
+                catch (Exception) when (columns.Length == 3)
+                {
+                    // retry without the optional column
+                }
+            }
+
+            return new List<Entity>();
         }
 
         /// <summary>Every component in a solution as (type, id) pairs, used to tell which components the target already has.</summary>

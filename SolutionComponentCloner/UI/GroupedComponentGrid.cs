@@ -111,8 +111,8 @@ namespace SolutionComponentCloner.UI
             ColumnHeadersDefaultCellStyle.BackColor = Color.White;
             ColumnHeadersDefaultCellStyle.SelectionBackColor = Color.White;
 
-            AddColumn("Component", fillWeight: 52);
-            AddColumn("Note", fillWeight: 28);
+            AddColumn("Component", fillWeight: 44);
+            AddColumn("Note", fillWeight: 36);
             AddColumn("Modified", width: 128);
             AddColumn("Modified by", width: 140);
             AddColumn("State", width: 84);
@@ -568,6 +568,12 @@ namespace SolutionComponentCloner.UI
                 return;
             }
 
+            var left = bounds.Left + 6;
+            if (item.IsAddedCompletely)
+            {
+                left = PaintChip(g, bounds, left, "Added completely — all subcomponents");
+            }
+
             var notes = new List<string>();
             var color = Theme.TextSecondary;
 
@@ -587,10 +593,36 @@ namespace SolutionComponentCloner.UI
                 notes.Add("Already in target");
             }
 
-            PaintTextColored(g, bounds, string.Join(" · ", notes), color);
+            PaintTextColored(g, bounds, left, string.Join(" · ", notes), color);
         }
 
-        private static void PaintTextColored(Graphics g, Rectangle bounds, string text, Color color)
+        /// <summary>A yellow highlighted note; returns the x position where the next note can start.</summary>
+        private static int PaintChip(Graphics g, Rectangle bounds, int left, string text)
+        {
+            const int padding = 8;
+            var textWidth = TextRenderer.MeasureText(text, Theme.FontRegular, Size.Empty, TextFormatFlags.NoPadding).Width;
+            var width = Math.Min(textWidth + padding * 2, Math.Max(0, bounds.Right - 4 - left));
+            if (width <= padding * 2)
+            {
+                return left;
+            }
+
+            var chip = new Rectangle(left, bounds.Top + (bounds.Height - 20) / 2, width, 20);
+            using (var fill = new SolidBrush(Theme.WarningBackground))
+            using (var border = new Pen(Theme.WarningBorder))
+            {
+                g.FillRectangle(fill, chip);
+                g.DrawRectangle(border, chip.X, chip.Y, chip.Width - 1, chip.Height - 1);
+            }
+
+            TextRenderer.DrawText(g, text, Theme.FontRegular,
+                new Rectangle(chip.Left + padding, chip.Top, chip.Width - padding * 2, chip.Height), Theme.Warning,
+                TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
+
+            return chip.Right + 8;
+        }
+
+        private static void PaintTextColored(Graphics g, Rectangle bounds, int left, string text, Color color)
         {
             if (string.IsNullOrEmpty(text))
             {
@@ -598,7 +630,7 @@ namespace SolutionComponentCloner.UI
             }
 
             TextRenderer.DrawText(g, text, Theme.FontRegular,
-                new Rectangle(bounds.Left + 6, bounds.Top, Math.Max(0, bounds.Width - 6), bounds.Height), color,
+                new Rectangle(left, bounds.Top, Math.Max(0, bounds.Right - left), bounds.Height), color,
                 TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
         }
 

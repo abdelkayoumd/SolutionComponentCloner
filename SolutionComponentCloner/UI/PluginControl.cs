@@ -1030,6 +1030,18 @@ namespace SolutionComponentCloner.UI
                 return;
             }
 
+            var warnings = CopyWarnings.Build(selected, _chkIncludeRequired.Checked);
+            if (warnings.Count > 0)
+            {
+                using (var dialog = new CopyWarningDialog(warnings, target.FriendlyName))
+                {
+                    if (dialog.ShowDialog(this) != DialogResult.OK)
+                    {
+                        return;
+                    }
+                }
+            }
+
             StartCopy(selected, target.UniqueName, target.FriendlyName, _chkIncludeRequired.Checked);
         }
 
