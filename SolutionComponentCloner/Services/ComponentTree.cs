@@ -5,6 +5,14 @@ using SolutionComponentCloner.Models;
 
 namespace SolutionComponentCloner.Services
 {
+    internal enum ComponentSortColumn { Name, Modified, ModifiedBy, State }
+
+    internal sealed class ComponentSort
+    {
+        public ComponentSortColumn Column { get; set; }
+        public bool Descending { get; set; }
+    }
+
     /// <summary>A folder or component in the solution explorer tree.</summary>
     internal sealed class ComponentNode
     {
@@ -14,6 +22,9 @@ namespace SolutionComponentCloner.Services
         public ComponentNode Parent { get; set; }
         public int Depth { get; set; }
         public List<ComponentNode> Children { get; } = new List<ComponentNode>();
+
+        /// <summary>A path that identifies this node across rebuilds, so folders keep their open/closed state.</summary>
+        public string Key { get; set; } = string.Empty;
 
         /// <summary>The component this row stands for: a leaf's own component, or the table component on a table folder.</summary>
         public SolutionComponentItem Item { get; set; }
@@ -60,12 +71,25 @@ namespace SolutionComponentCloner.Services
         {
             if (!_index.TryGetValue(key, out var child))
             {
-                child = new ComponentNode { Name = name, Parent = this };
+                child = new ComponentNode { Name = name, Parent = this, Key = Key + "/" + key };
                 _index[key] = child;
                 Children.Add(child);
             }
 
             return child;
+        }
+
+        public ComponentNode AddLeaf(SolutionComponentItem item)
+        {
+            var leaf = new ComponentNode
+            {
+                Name = item.DisplayName,
+                Item = item,
+                Parent = this,
+                Key = Key + "/" + item.ComponentType + ":" + item.ObjectId
+            };
+            Children.Add(leaf);
+            return leaf;
         }
     }
 
@@ -73,10 +97,10 @@ namespace SolutionComponentCloner.Services
     {
         private static readonly string[] CategoryOrder =
         {
-            "Columns", "Relationships", "Keys", "Forms", "Views", "Charts", "Dashboards", "Business rules"
+            "Columns", "Relationships", "Keys", "Forms", "Views", "Charts", "Dashboards", "Business rules", "Commands", "Messages"
         };
 
-        public static List<ComponentNode> Build(IEnumerable<SolutionComponentItem> items)
+        public static List<ComponentNode> Build(IEnumerable<SolutionComponentItem> items, ComponentSort sort = null)
         {
             var roots = new ComponentNode();
 
@@ -99,33 +123,74 @@ namespace SolutionComponentCloner.Services
                     }
 
                     var parent = string.IsNullOrEmpty(item.Category) ? table : table.GetOrAddChild(item.Category, item.Category);
-                    parent.Children.Add(new ComponentNode { Name = item.DisplayName, Item = item, Parent = parent });
+                    parent.AddLeaf(item);
                     continue;
                 }
 
                 var container = string.IsNullOrEmpty(item.SubGroup) ? group : group.GetOrAddChild(item.SubGroup, item.SubGroup);
-                container.Children.Add(new ComponentNode { Name = item.DisplayName, Item = item, Parent = container });
+                container.AddLeaf(item);
             }
 
-            SortAndNumber(roots, -1);
+            SortAndNumber(roots, -1, sort);
             return roots.Children;
         }
 
-        private static void SortAndNumber(ComponentNode node, int depth)
+        private static void SortAndNumber(ComponentNode node, int depth, ComponentSort sort)
         {
             node.Depth = depth;
 
-            var ordered = node.Children
-                .OrderBy(c => c.HasChildren || c.IsTable ? 0 : 1)
-                .ThenBy(c => CategoryRank(c))
+            var folders = node.Children
+                .Where(c => c.HasChildren || c.IsTable)
+                .OrderBy(c => CategoryRank(c))
                 .ThenBy(c => c.Name, StringComparer.OrdinalIgnoreCase)
                 .ToList();
+            var leaves = node.Children.Where(c => !(c.HasChildren || c.IsTable)).ToList();
+            leaves.Sort(new LeafComparer(sort));
+
             node.Children.Clear();
-            node.Children.AddRange(ordered);
+            node.Children.AddRange(folders);
+            node.Children.AddRange(leaves);
 
             foreach (var child in node.Children)
             {
-                SortAndNumber(child, depth + 1);
+                SortAndNumber(child, depth + 1, sort);
+            }
+        }
+
+        private sealed class LeafComparer : IComparer<ComponentNode>
+        {
+            private readonly ComponentSort _sort;
+
+            public LeafComparer(ComponentSort sort)
+            {
+                _sort = sort ?? new ComponentSort { Column = ComponentSortColumn.Name };
+            }
+
+            public int Compare(ComponentNode a, ComponentNode b)
+            {
+                int result;
+                switch (_sort.Column)
+                {
+                    case ComponentSortColumn.Modified:
+                        result = Nullable.Compare(a.Item.ModifiedOn, b.Item.ModifiedOn);
+                        break;
+                    case ComponentSortColumn.ModifiedBy:
+                        result = string.Compare(a.Item.ModifiedBy, b.Item.ModifiedBy, StringComparison.OrdinalIgnoreCase);
+                        break;
+                    case ComponentSortColumn.State:
+                        result = Nullable.Compare(a.Item.IsManaged, b.Item.IsManaged);
+                        break;
+                    default:
+                        result = string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
+                        break;
+                }
+
+                if (_sort.Descending)
+                {
+                    result = -result;
+                }
+
+                return result != 0 ? result : string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase);
             }
         }
 

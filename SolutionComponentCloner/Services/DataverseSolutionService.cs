@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Microsoft.Crm.Sdk.Messages;
 using Microsoft.Xrm.Sdk;
+using Microsoft.Xrm.Sdk.Messages;
 using Microsoft.Xrm.Sdk.Query;
 using SolutionComponentCloner.Models;
 
@@ -60,12 +61,32 @@ namespace SolutionComponentCloner.Services
                 })
                 .ToList();
 
+            loadResult.Items = ResolveItems(service, rows, loadResult.Warnings, progress);
+            return loadResult;
+        }
+
+        /// <summary>Every component in a solution as (type, id) pairs, used to tell which components the target already has.</summary>
+        public HashSet<(int Type, Guid Id)> GetSolutionComponentKeys(IOrganizationService service, Guid solutionId)
+        {
+            var query = new QueryExpression("solutioncomponent")
+            {
+                ColumnSet = new ColumnSet("objectid", "componenttype"),
+                Criteria = new FilterExpression()
+            };
+            query.Criteria.AddCondition("solutionid", ConditionOperator.Equal, solutionId);
+
+            return new HashSet<(int Type, Guid Id)>(RetrieveAll(service, query)
+                .Select(e => (e.GetAttributeValue<OptionSetValue>("componenttype")?.Value ?? 0, e.GetAttributeValue<Guid>("objectid"))));
+        }
+
+        private List<SolutionComponentItem> ResolveItems(IOrganizationService service, List<SolutionComponentItem> rows, List<string> warnings, Action<string> progress)
+        {
             var groups = rows.GroupBy(r => r.ComponentType).ToList();
             for (var i = 0; i < groups.Count; i++)
             {
                 var group = groups[i];
                 progress?.Invoke($"Resolving names: {ComponentTypeCatalog.GetGroupName(group.Key, null)} ({group.Count()}), type {i + 1} of {groups.Count}...");
-                ResolveDisplayNames(service, group.Key, group.ToList(), loadResult.Warnings);
+                ResolveDisplayNames(service, group.Key, group.ToList(), warnings);
             }
 
             foreach (var row in rows)
@@ -89,11 +110,63 @@ namespace SolutionComponentCloner.Services
                 }
             }
 
-            loadResult.Items = rows
+            return rows
                 .OrderBy(r => r.ComponentTypeName)
                 .ThenBy(r => r.DisplayName)
                 .ToList();
-            return loadResult;
+        }
+
+        /// <summary>
+        /// The components that would be pulled in by "Include required components" for the given selection,
+        /// excluding anything already in the selection.
+        /// </summary>
+        public SolutionComponentLoadResult GetRequiredComponents(IOrganizationService service, IList<SolutionComponentItem> selected,
+            Action<string> progress = null, Func<bool> isCancelled = null)
+        {
+            var result = new SolutionComponentLoadResult();
+            var selectedKeys = new HashSet<(int, Guid)>(selected.Select(i => (i.ComponentType, i.ObjectId)));
+            var requests = selected
+                .Select(i => (OrganizationRequest)new RetrieveRequiredComponentsRequest { ObjectId = i.ObjectId, ComponentType = i.ComponentType })
+                .ToList();
+
+            var outcomes = ExecuteInBatches(service, requests, 20, done => progress?.Invoke($"Checking dependencies: {done} of {requests.Count}..."), isCancelled, out _);
+
+            var found = new Dictionary<(int, Guid), SolutionComponentItem>();
+            var failed = 0;
+            foreach (var outcome in outcomes)
+            {
+                if (outcome.Error != null)
+                {
+                    failed++;
+                    continue;
+                }
+
+                var collection = (outcome.Response as RetrieveRequiredComponentsResponse)?.EntityCollection;
+                if (collection == null)
+                {
+                    continue;
+                }
+
+                foreach (var dependency in collection.Entities)
+                {
+                    var id = dependency.GetAttributeValue<Guid>("requiredcomponentobjectid");
+                    var type = dependency.GetAttributeValue<OptionSetValue>("requiredcomponenttype")?.Value ?? 0;
+                    if (id == Guid.Empty || selectedKeys.Contains((type, id)) || found.ContainsKey((type, id)))
+                    {
+                        continue;
+                    }
+
+                    found[(type, id)] = new SolutionComponentItem { ObjectId = id, ComponentType = type };
+                }
+            }
+
+            if (failed > 0)
+            {
+                result.Warnings.Add($"{failed} component(s) could not be checked for dependencies.");
+            }
+
+            result.Items = ResolveItems(service, found.Values.ToList(), result.Warnings, progress);
+            return result;
         }
 
         private static List<Entity> RetrieveAll(IOrganizationService service, QueryExpression query)
@@ -185,7 +258,39 @@ namespace SolutionComponentCloner.Services
                 return;
             }
 
+            // Best effort: some custom types (command bar commands, custom messages) belong to a table. If the
+            // table column is not there, fall back to names only rather than losing the whole type.
+            var applier = GetDynamicHierarchyApplier(primaryEntityName, out var hintColumns);
+            if (applier != null)
+            {
+                try
+                {
+                    ResolveTableBackedNames(service, primaryEntityName, entityMetadata.PrimaryIdAttribute, entityMetadata.PrimaryNameAttribute, items, hintColumns, applier);
+                    return;
+                }
+                catch (Exception)
+                {
+                    // fall through to the plain lookup
+                }
+            }
+
             ResolveTableBackedNames(service, primaryEntityName, entityMetadata.PrimaryIdAttribute, entityMetadata.PrimaryNameAttribute, items);
+        }
+
+        private static Action<SolutionComponentItem, Entity> GetDynamicHierarchyApplier(string primaryEntityName, out string[] extraColumns)
+        {
+            switch ((primaryEntityName ?? string.Empty).ToLowerInvariant())
+            {
+                case "customapi":
+                    extraColumns = new[] { "boundentitylogicalname" };
+                    return (item, e) => Place(item, e.GetAttributeValue<string>("boundentitylogicalname"), "Messages", null);
+                case "appaction":
+                    extraColumns = new[] { "contextentity" };
+                    return (item, e) => Place(item, e.GetAttributeValue<string>("contextentity"), "Commands", null);
+                default:
+                    extraColumns = null;
+                    return null;
+            }
         }
 
         private void ResolveMetadataBackedNames(IOrganizationService service, int componentType, List<SolutionComponentItem> items)
@@ -212,6 +317,7 @@ namespace SolutionComponentCloner.Services
                         item.DisplayName = _metadataCache.GetEntityName(service, item.ObjectId);
                         item.TableName = _metadataCache.GetEntityLogicalName(service, item.ObjectId);
                         item.TableLabel = item.DisplayName;
+                        item.IsManaged = _metadataCache.GetEntityIsManaged(service, item.ObjectId);
                         break;
                     case ComponentTypeCatalog.Attribute:
                         item.DisplayName = _metadataCache.GetAttributeName(item.ObjectId);
@@ -315,7 +421,18 @@ namespace SolutionComponentCloner.Services
             }
         }
 
-        private static void ResolveTableBackedNames(IOrganizationService service, string entityLogicalName, string primaryKey, string nameAttribute, List<SolutionComponentItem> items,
+        // Modified date, modified by and managed state are nice to have but not every table has all three, so each table
+        // is tried with all of them, then without "ismanaged", then without any, and the result is remembered.
+        private static readonly string[][] CommonColumnLevels =
+        {
+            new[] { "modifiedon", "modifiedby", "ismanaged" },
+            new[] { "modifiedon", "modifiedby" },
+            new string[0]
+        };
+
+        private readonly Dictionary<string, int> _commonColumnLevel = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        private void ResolveTableBackedNames(IOrganizationService service, string entityLogicalName, string primaryKey, string nameAttribute, List<SolutionComponentItem> items,
             string[] extraColumns = null, Action<SolutionComponentItem, Entity> applyExtra = null)
         {
             const int batchSize = 500;
@@ -324,20 +441,13 @@ namespace SolutionComponentCloner.Services
                 var batch = items.Skip(offset).Take(batchSize).ToList();
                 var ids = batch.Select(i => (object)i.ObjectId).ToArray();
 
-                var columns = new List<string> { primaryKey, nameAttribute };
+                var required = new List<string> { primaryKey, nameAttribute };
                 if (extraColumns != null)
                 {
-                    columns.AddRange(extraColumns);
+                    required.AddRange(extraColumns);
                 }
 
-                var query = new QueryExpression(entityLogicalName)
-                {
-                    ColumnSet = new ColumnSet(columns.ToArray()),
-                    Criteria = new FilterExpression()
-                };
-                query.Criteria.AddCondition(primaryKey, ConditionOperator.In, ids);
-
-                var lookup = service.RetrieveMultiple(query).Entities.ToDictionary(e => e.Id);
+                var lookup = QueryByIds(service, entityLogicalName, primaryKey, required, ids).ToDictionary(e => e.Id);
 
                 foreach (var item in batch)
                 {
@@ -352,36 +462,221 @@ namespace SolutionComponentCloner.Services
                         item.DisplayName = name;
                     }
 
+                    ApplyCommonColumns(item, entity);
                     applyExtra?.Invoke(item, entity);
                 }
             }
+        }
+
+        private IEnumerable<Entity> QueryByIds(IOrganizationService service, string entityLogicalName, string primaryKey, List<string> requiredColumns, object[] ids)
+        {
+            _commonColumnLevel.TryGetValue(entityLogicalName, out var level);
+
+            for (; level < CommonColumnLevels.Length; level++)
+            {
+                var columns = requiredColumns.Concat(CommonColumnLevels[level]).Distinct().ToArray();
+                var query = new QueryExpression(entityLogicalName)
+                {
+                    ColumnSet = new ColumnSet(columns),
+                    Criteria = new FilterExpression()
+                };
+                query.Criteria.AddCondition(primaryKey, ConditionOperator.In, ids);
+
+                try
+                {
+                    var entities = service.RetrieveMultiple(query).Entities;
+                    _commonColumnLevel[entityLogicalName] = level;
+                    return entities;
+                }
+                catch (Exception) when (level < CommonColumnLevels.Length - 1)
+                {
+                    // This table lacks one of the optional columns; try the next, smaller set.
+                }
+            }
+
+            return Enumerable.Empty<Entity>();
+        }
+
+        private static void ApplyCommonColumns(SolutionComponentItem item, Entity entity)
+        {
+            if (entity.Contains("modifiedon"))
+            {
+                item.ModifiedOn = entity.GetAttributeValue<DateTime?>("modifiedon")?.ToLocalTime();
+            }
+
+            if (entity.Contains("modifiedby"))
+            {
+                item.ModifiedBy = entity.FormattedValues.Contains("modifiedby")
+                    ? entity.FormattedValues["modifiedby"]
+                    : entity.GetAttributeValue<EntityReference>("modifiedby")?.Name;
+            }
+
+            if (entity.Contains("ismanaged"))
+            {
+                item.IsManaged = entity.GetAttributeValue<bool?>("ismanaged");
+            }
+        }
+
+        /// <summary>Runs requests through ExecuteMultiple in batches, returning one outcome per request that was attempted.</summary>
+        private static List<(OrganizationResponse Response, string Error)> ExecuteInBatches(IOrganizationService service, IList<OrganizationRequest> requests,
+            int batchSize, Action<int> progress, Func<bool> isCancelled, out bool cancelled)
+        {
+            var outcomes = new List<(OrganizationResponse, string)>();
+            cancelled = false;
+
+            for (var offset = 0; offset < requests.Count; offset += batchSize)
+            {
+                if (isCancelled != null && isCancelled())
+                {
+                    cancelled = true;
+                    break;
+                }
+
+                var batch = requests.Skip(offset).Take(batchSize).ToList();
+
+                try
+                {
+                    var multiple = new ExecuteMultipleRequest
+                    {
+                        Settings = new ExecuteMultipleSettings { ContinueOnError = true, ReturnResponses = true },
+                        Requests = new OrganizationRequestCollection()
+                    };
+                    multiple.Requests.AddRange(batch);
+
+                    var response = (ExecuteMultipleResponse)service.Execute(multiple);
+                    var byIndex = response.Responses.ToDictionary(r => r.RequestIndex);
+                    for (var i = 0; i < batch.Count; i++)
+                    {
+                        if (byIndex.TryGetValue(i, out var item))
+                        {
+                            outcomes.Add(item.Fault != null ? ((OrganizationResponse)null, item.Fault.Message) : (item.Response, (string)null));
+                        }
+                        else
+                        {
+                            outcomes.Add((null, "No response was returned for this request."));
+                        }
+                    }
+                }
+                catch (Exception)
+                {
+                    // Batching is an optimisation; if the organization rejects it, run these requests one by one.
+                    foreach (var request in batch)
+                    {
+                        try
+                        {
+                            outcomes.Add((service.Execute(request), null));
+                        }
+                        catch (Exception ex)
+                        {
+                            outcomes.Add((null, ex.Message));
+                        }
+                    }
+                }
+
+                progress?.Invoke(outcomes.Count);
+            }
+
+            return outcomes;
+        }
+
+        /// <summary>
+        /// Adds the components to the target in ExecuteMultiple batches. Stops between batches when
+        /// <paramref name="isCancelled"/> returns true; the results then cover only what was attempted.
+        /// </summary>
+        public List<ComponentCopyResult> CopyComponents(IOrganizationService service, IList<SolutionComponentItem> components, string targetSolutionUniqueName,
+            bool addRequiredComponents, Action<int, int> progress, Func<bool> isCancelled, out bool cancelled)
+        {
+            var requests = components
+                .Select(c => (OrganizationRequest)BuildAddRequest(c, targetSolutionUniqueName, addRequiredComponents))
+                .ToList();
+
+            var outcomes = ExecuteInBatches(service, requests, 20, done => progress?.Invoke(done, components.Count), isCancelled, out cancelled);
+
+            var results = new List<ComponentCopyResult>();
+            for (var i = 0; i < outcomes.Count; i++)
+            {
+                results.Add(new ComponentCopyResult
+                {
+                    Component = components[i],
+                    Outcome = outcomes[i].Error == null ? CopyOutcome.Success : CopyOutcome.Failed,
+                    Message = outcomes[i].Error ?? (addRequiredComponents ? "Added with required components." : "Added.")
+                });
+            }
+
+            return results;
+        }
+
+        public void PublishAll(IOrganizationService service)
+        {
+            service.Execute(new PublishAllXmlRequest());
+        }
+
+        public List<PublisherListItem> GetPublishers(IOrganizationService service)
+        {
+            var query = new QueryExpression("publisher")
+            {
+                ColumnSet = new ColumnSet("publisherid", "friendlyname", "uniquename", "customizationprefix"),
+                Orders = { new OrderExpression("friendlyname", OrderType.Ascending) }
+            };
+
+            return RetrieveAll(service, query)
+                .Select(e => new PublisherListItem
+                {
+                    PublisherId = e.Id,
+                    FriendlyName = e.GetAttributeValue<string>("friendlyname"),
+                    UniqueName = e.GetAttributeValue<string>("uniquename"),
+                    Prefix = e.GetAttributeValue<string>("customizationprefix")
+                })
+                .ToList();
+        }
+
+        public Guid CreateSolution(IOrganizationService service, string friendlyName, string uniqueName, string version, Guid publisherId)
+        {
+            var solution = new Entity("solution");
+            solution["friendlyname"] = friendlyName;
+            solution["uniquename"] = uniqueName;
+            solution["version"] = version;
+            solution["publisherid"] = new EntityReference("publisher", publisherId);
+            return service.Create(solution);
+        }
+
+        private static AddSolutionComponentRequest BuildAddRequest(SolutionComponentItem component, string targetSolutionUniqueName, bool addRequiredComponents)
+        {
+            var request = new AddSolutionComponentRequest
+            {
+                ComponentId = component.ObjectId,
+                ComponentType = component.ComponentType,
+                SolutionUniqueName = targetSolutionUniqueName,
+                AddRequiredComponents = addRequiredComponents
+            };
+
+            // DoNotIncludeSubcomponents is a separate switch from AddRequiredComponents: it controls whether THIS
+            // component's own children (e.g. a table's columns, forms, views) come along. Dataverse only accepts it
+            // for Entity-rooted components, so it is only ever set for tables; each table can override the checkbox.
+            if (component.ComponentType == ComponentTypeCatalog.Entity)
+            {
+                switch (component.SubcomponentMode)
+                {
+                    case SubcomponentMode.IncludeAll:
+                        request.DoNotIncludeSubcomponents = false;
+                        break;
+                    case SubcomponentMode.OnlySelected:
+                        request.DoNotIncludeSubcomponents = true;
+                        break;
+                    default:
+                        request.DoNotIncludeSubcomponents = !addRequiredComponents;
+                        break;
+                }
+            }
+
+            return request;
         }
 
         public ComponentCopyResult CopyComponent(IOrganizationService service, SolutionComponentItem component, string targetSolutionUniqueName, bool addRequiredComponents)
         {
             try
             {
-                var request = new AddSolutionComponentRequest
-                {
-                    ComponentId = component.ObjectId,
-                    ComponentType = component.ComponentType,
-                    SolutionUniqueName = targetSolutionUniqueName,
-                    AddRequiredComponents = addRequiredComponents
-                };
-
-                // DoNotIncludeSubcomponents is a separate switch from AddRequiredComponents: it
-                // controls whether THIS component's own children (e.g. an entity's attributes,
-                // forms, views) come along for the ride. Dataverse only accepts it for Entity-
-                // rooted components — passing it for any other type (a view, an app setting,
-                // etc.) throws "DoNotIncludeSubcomponents can not be set to true on non Entity
-                // root ...". So only tie it to the checkbox when the component actually is an
-                // Entity; every other type is a leaf and AddRequiredComponents alone governs it.
-                if (component.ComponentType == ComponentTypeCatalog.Entity)
-                {
-                    request.DoNotIncludeSubcomponents = !addRequiredComponents;
-                }
-
-                service.Execute(request);
+                service.Execute(BuildAddRequest(component, targetSolutionUniqueName, addRequiredComponents));
 
                 return new ComponentCopyResult
                 {

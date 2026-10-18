@@ -24,5 +24,17 @@ namespace SolutionComponentCloner.Models
 
         /// <summary>Sub-folder under a top-level group, e.g. "Code", "Data", "Images" for web resources.</summary>
         public string SubGroup { get; set; }
+
+        public DateTime? ModifiedOn { get; set; }
+        public string ModifiedBy { get; set; }
+
+        /// <summary>True for a managed component, false for unmanaged, null when Dataverse does not say.</summary>
+        public bool? IsManaged { get; set; }
+
+        /// <summary>True when the same component is already in the target solution.</summary>
+        public bool InTarget { get; set; }
+
+        /// <summary>For a table: how its subcomponents are treated on copy.</summary>
+        public SubcomponentMode SubcomponentMode { get; set; }
     }
 }

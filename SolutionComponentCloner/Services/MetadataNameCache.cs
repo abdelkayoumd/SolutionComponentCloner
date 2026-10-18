@@ -22,6 +22,7 @@ namespace SolutionComponentCloner.Services
         private readonly Dictionary<Guid, string> _keys = new Dictionary<Guid, string>();
         private readonly Dictionary<Guid, string> _optionSets = new Dictionary<Guid, string>();
         private readonly Dictionary<Guid, string> _entityLogicalNames = new Dictionary<Guid, string>();
+        private readonly Dictionary<Guid, bool> _entityManaged = new Dictionary<Guid, bool>();
         private readonly Dictionary<Guid, string> _attributeTables = new Dictionary<Guid, string>();
         private readonly Dictionary<Guid, string> _keyTables = new Dictionary<Guid, string>();
         private readonly Dictionary<Guid, string> _relationshipTables = new Dictionary<Guid, string>();
@@ -41,6 +42,12 @@ namespace SolutionComponentCloner.Services
         {
             EnsureEntities(service);
             return _entityLogicalNames.TryGetValue(metadataId, out var name) ? name : null;
+        }
+
+        public bool? GetEntityIsManaged(IOrganizationService service, Guid metadataId)
+        {
+            EnsureEntities(service);
+            return _entityManaged.TryGetValue(metadataId, out var managed) ? managed : (bool?)null;
         }
 
         /// <summary>
@@ -220,6 +227,10 @@ namespace SolutionComponentCloner.Services
             {
                 _entities[entity.MetadataId.Value] = FormatLabel(entity.DisplayName, entity.LogicalName);
                 _entityLogicalNames[entity.MetadataId.Value] = entity.LogicalName;
+                if (entity.IsManaged.HasValue)
+                {
+                    _entityManaged[entity.MetadataId.Value] = entity.IsManaged.Value;
+                }
             }
 
             if (!string.IsNullOrEmpty(entity.LogicalName))
