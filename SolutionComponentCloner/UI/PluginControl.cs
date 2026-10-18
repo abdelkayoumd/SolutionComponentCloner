@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using SolutionComponentCloner.Models;
 using SolutionComponentCloner.Services;
@@ -13,7 +15,19 @@ namespace SolutionComponentCloner.UI
 {
     public partial class PluginControl : PluginControlBase
     {
+        private const int EmSetCueBanner = 0x1501;
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, string lParam);
+
+        private sealed class CopyOutcomeData
+        {
+            public List<ComponentCopyResult> Results;
+            public bool Cancelled;
+        }
+
         private readonly DataverseSolutionService _dataService = new DataverseSolutionService();
+        private PluginSettings _settings = new PluginSettings();
 
         private SolutionPickerControl _cmbSource;
         private SolutionPickerControl _cmbTarget;
@@ -24,17 +38,34 @@ namespace SolutionComponentCloner.UI
         private Label _lblViewTitle;
         private Guid? _lastSourceId;
         private Guid? _lastTargetId;
+        private List<SolutionListItem> _solutions = new List<SolutionListItem>();
+        private Guid _connectionId;
+        private bool _applySavedSelection;
+        private bool _applyingSettings;
+        private string _pendingTargetUniqueName;
 
+        private FlowLayoutPanel _commandBar;
         private CommandButton _cmdCopy;
+        private CommandButton _cmdPreview;
         private CommandButton _cmdSelectAll;
         private CommandButton _cmdClear;
         private CommandButton _cmdCollapse;
         private CommandButton _cmdExpand;
         private CommandButton _cmdRefresh;
-        private CommandButton _cmdExport;
+        private CommandButton _cmdMore;
         private CheckBox _chkIncludeRequired;
+        private TextBox _txtSearch;
+        private ContextMenuStrip _moreMenu;
+        private ToolStripMenuItem _miHideExisting;
+        private ToolStripMenuItem _miPublish;
+        private ToolStripMenuItem _miNewSolution;
+        private ToolStripMenuItem _miSaveSelection;
+        private ToolStripMenuItem _miLoadSelection;
+        private ToolStripMenuItem _miModifiedSince;
+        private ToolStripMenuItem _miExport;
 
         private Banner _warnBanner;
+        private Banner _noticeBanner;
         private Banner _resultBanner;
         private GroupedComponentGrid _grid;
         private SplitContainer _split;
@@ -43,9 +74,15 @@ namespace SolutionComponentCloner.UI
         private Label _lblFooter;
         private List<ComponentCopyResult> _lastResults = new List<ComponentCopyResult>();
 
+        private HashSet<(int Type, Guid Id)> _targetKeys;
+        private int _onlyInTargetCount;
+        private BackgroundWorker _copyWorker;
+        private bool _busy;
+
         public PluginControl()
         {
             ToolName = "Solution Component Cloner";
+            LoadSettings();
             BuildLayout();
             ConnectionUpdated += PluginControl_ConnectionUpdated;
         }
@@ -55,9 +92,75 @@ namespace SolutionComponentCloner.UI
             _lblConnection.Text = e.ConnectionDetail != null
                 ? $"Connected to {e.ConnectionDetail.OrganizationFriendlyName}"
                 : "Connected";
+            _connectionId = e.ConnectionDetail?.ConnectionId ?? Guid.Empty;
+            _applySavedSelection = true;
 
             LoadSolutionsAsync();
         }
+
+        #region Settings
+
+        private void LoadSettings()
+        {
+            try
+            {
+                if (SettingsManager.Instance.TryLoad(typeof(PluginControl), out PluginSettings loaded) && loaded != null)
+                {
+                    _settings = loaded;
+                }
+            }
+            catch (Exception)
+            {
+                // Preferences are a convenience; start with defaults if they cannot be read.
+            }
+        }
+
+        private void SaveSettings()
+        {
+            try
+            {
+                SettingsManager.Instance.Save(typeof(PluginControl), _settings);
+            }
+            catch (Exception)
+            {
+                // Not being able to remember a preference should never interrupt the user.
+            }
+        }
+
+        private void RememberSolutions(SolutionListItem source, SolutionListItem target)
+        {
+            if (_connectionId == Guid.Empty || _applyingSettings)
+            {
+                return;
+            }
+
+            var preference = _settings.GetOrAdd(_connectionId);
+            preference.SourceUniqueName = source.UniqueName;
+            preference.TargetUniqueName = target.UniqueName;
+            SaveSettings();
+        }
+
+        private void ApplySavedSolutions()
+        {
+            var preference = _connectionId == Guid.Empty ? null : _settings.ForConnection(_connectionId);
+            if (preference == null)
+            {
+                return;
+            }
+
+            _applyingSettings = true;
+            try
+            {
+                _cmbSource.SelectByUniqueName(preference.SourceUniqueName);
+                _cmbTarget.SelectByUniqueName(preference.TargetUniqueName);
+            }
+            finally
+            {
+                _applyingSettings = false;
+            }
+        }
+
+        #endregion
 
         #region Layout
 
@@ -90,6 +193,18 @@ namespace SolutionComponentCloner.UI
             root.Controls.Add(BuildFooter(), 0, 4);
 
             UpdateSelectionUi();
+        }
+
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if (keyData == (Keys.Control | Keys.F) && _txtSearch != null)
+            {
+                _txtSearch.Focus();
+                _txtSearch.SelectAll();
+                return true;
+            }
+
+            return base.ProcessCmdKey(ref msg, keyData);
         }
 
         private Control BuildHeader()
@@ -142,7 +257,7 @@ namespace SolutionComponentCloner.UI
 
         private Control BuildCommandBar()
         {
-            var bar = new FlowLayoutPanel
+            _commandBar = new FlowLayoutPanel
             {
                 Dock = DockStyle.Fill,
                 AutoSize = true,
@@ -151,21 +266,24 @@ namespace SolutionComponentCloner.UI
                 Margin = new Padding(0),
                 Padding = new Padding(6, 0, 6, 0)
             };
-            bar.Paint += (s, e) =>
+            _commandBar.Paint += (s, e) =>
             {
                 using (var pen = new Pen(Theme.Border))
                 {
-                    e.Graphics.DrawLine(pen, 0, bar.Height - 1, bar.Width, bar.Height - 1);
+                    e.Graphics.DrawLine(pen, 0, _commandBar.Height - 1, _commandBar.Width, _commandBar.Height - 1);
                 }
             };
 
             _cmdCopy = new CommandButton { Glyph = Theme.GlyphCopy, Text = "Copy to target", Strong = true };
             _cmdCopy.Click += (s, e) => ExecuteMethod(CopySelected);
 
+            _cmdPreview = new CommandButton { Glyph = Theme.GlyphPreview, Text = "Preview" };
+            _cmdPreview.Click += (s, e) => ExecuteMethod(PreviewRequired);
+
             _cmdSelectAll = new CommandButton { Glyph = Theme.GlyphSelectAll, Text = "Select all" };
             _cmdSelectAll.Click += (s, e) => _grid.SetAllSelected(true);
 
-            _cmdClear = new CommandButton { Glyph = Theme.GlyphClearSelection, Text = "Clear selection" };
+            _cmdClear = new CommandButton { Glyph = Theme.GlyphClearSelection, Text = "Clear" };
             _cmdClear.Click += (s, e) => _grid.SetAllSelected(false);
 
             _cmdCollapse = new CommandButton { Glyph = Theme.GlyphCollapse, Text = "Collapse all" };
@@ -177,29 +295,91 @@ namespace SolutionComponentCloner.UI
             _cmdRefresh = new CommandButton { Glyph = Theme.GlyphRefresh, Text = "Refresh" };
             _cmdRefresh.Click += (s, e) => ExecuteMethod(RefreshData);
 
-            _cmdExport = new CommandButton { Glyph = Theme.GlyphDownload, Text = "Export failures", Enabled = false };
-            _cmdExport.Click += BtnExportFailures_Click;
+            _cmdMore = new CommandButton { Glyph = Theme.GlyphMore, Text = "More" };
+            _cmdMore.Click += (s, e) => _moreMenu.Show(_cmdMore, new Point(0, _cmdMore.Height));
+            BuildMoreMenu();
 
             _chkIncludeRequired = new CheckBox
             {
-                Text = "Include required components",
+                Text = "Include required",
                 AutoSize = true,
                 Font = Theme.FontRegular,
                 ForeColor = Theme.TextPrimary,
-                Margin = new Padding(10, 11, 6, 0)
+                Margin = new Padding(10, 11, 6, 0),
+                Checked = _settings.IncludeRequired
+            };
+            _chkIncludeRequired.CheckedChanged += (s, e) =>
+            {
+                _settings.IncludeRequired = _chkIncludeRequired.Checked;
+                SaveSettings();
             };
 
-            bar.Controls.Add(_cmdCopy);
-            bar.Controls.Add(_cmdSelectAll);
-            bar.Controls.Add(_cmdClear);
-            bar.Controls.Add(CreateCommandSeparator());
-            bar.Controls.Add(_cmdCollapse);
-            bar.Controls.Add(_cmdExpand);
-            bar.Controls.Add(CreateCommandSeparator());
-            bar.Controls.Add(_cmdRefresh);
-            bar.Controls.Add(_cmdExport);
-            bar.Controls.Add(_chkIncludeRequired);
-            return bar;
+            _commandBar.Controls.Add(_cmdCopy);
+            _commandBar.Controls.Add(_cmdPreview);
+            _commandBar.Controls.Add(_cmdSelectAll);
+            _commandBar.Controls.Add(_cmdClear);
+            _commandBar.Controls.Add(CreateCommandSeparator());
+            _commandBar.Controls.Add(_cmdCollapse);
+            _commandBar.Controls.Add(_cmdExpand);
+            _commandBar.Controls.Add(CreateCommandSeparator());
+            _commandBar.Controls.Add(_cmdRefresh);
+            _commandBar.Controls.Add(_cmdMore);
+            _commandBar.Controls.Add(_chkIncludeRequired);
+
+            var tips = new ToolTip { AutoPopDelay = 15000 };
+            tips.SetToolTip(_cmdCopy, "Copy the ticked components into the target solution");
+            tips.SetToolTip(_cmdPreview, "Preview the required components that would be added along with your selection");
+            tips.SetToolTip(_cmdSelectAll, "Tick everything shown (use the search box first to tick only the matches)");
+            tips.SetToolTip(_cmdClear, "Clear every tick");
+            tips.SetToolTip(_chkIncludeRequired, "Also add every component the selected ones depend on (tables can override this from their right-click menu)");
+            return _commandBar;
+        }
+
+        private void BuildMoreMenu()
+        {
+            _moreMenu = new ContextMenuStrip();
+
+            _miHideExisting = new ToolStripMenuItem("Hide components already in target")
+            {
+                CheckOnClick = true,
+                Checked = _settings.HideExisting,
+                Enabled = false
+            };
+            _miHideExisting.CheckedChanged += (s, e) =>
+            {
+                _settings.HideExisting = _miHideExisting.Checked;
+                SaveSettings();
+                _grid.HideInTarget = _miHideExisting.Checked;
+            };
+
+            _miPublish = new ToolStripMenuItem("Publish all customizations");
+            _miPublish.Click += (s, e) => ExecuteMethod(PublishAllCustomizations);
+
+            _miNewSolution = new ToolStripMenuItem("New target solution...");
+            _miNewSolution.Click += (s, e) => ExecuteMethod(NewTargetSolution);
+
+            _miSaveSelection = new ToolStripMenuItem("Save selection...");
+            _miSaveSelection.Click += (s, e) => SaveSelection();
+
+            _miLoadSelection = new ToolStripMenuItem("Load selection...");
+            _miLoadSelection.Click += (s, e) => LoadSelection();
+
+            _miModifiedSince = new ToolStripMenuItem("Select modified since...");
+            _miModifiedSince.Click += (s, e) => SelectModifiedSince();
+
+            _miExport = new ToolStripMenuItem("Export failures...") { Enabled = false };
+            _miExport.Click += BtnExportFailures_Click;
+
+            _moreMenu.Items.Add(_miHideExisting);
+            _moreMenu.Items.Add(new ToolStripSeparator());
+            _moreMenu.Items.Add(_miPublish);
+            _moreMenu.Items.Add(_miNewSolution);
+            _moreMenu.Items.Add(new ToolStripSeparator());
+            _moreMenu.Items.Add(_miSaveSelection);
+            _moreMenu.Items.Add(_miLoadSelection);
+            _moreMenu.Items.Add(_miModifiedSince);
+            _moreMenu.Items.Add(new ToolStripSeparator());
+            _moreMenu.Items.Add(_miExport);
         }
 
         private static Control CreateCommandSeparator()
@@ -224,18 +404,73 @@ namespace SolutionComponentCloner.UI
                 Font = new Font("Segoe UI Semibold", 13.5F, FontStyle.Bold),
                 ForeColor = Theme.TextPrimary,
                 AutoSize = true,
-                Margin = new Padding(14, 10, 14, 6)
+                Anchor = AnchorStyles.Left,
+                Margin = new Padding(14, 8, 14, 4)
             };
 
+            var titleRow = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                AutoSize = true,
+                ColumnCount = 2,
+                Margin = new Padding(0)
+            };
+            titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+            titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            titleRow.Controls.Add(_lblViewTitle, 0, 0);
+            titleRow.Controls.Add(BuildSearchBox(), 1, 0);
+
             _warnBanner = new Banner();
+            _noticeBanner = new Banner();
             _resultBanner = new Banner();
 
-            top.Controls.Add(_lblViewTitle);
+            top.Controls.Add(titleRow);
             top.Controls.Add(BuildLookupRow());
             top.Controls.Add(BuildPickersHost());
             top.Controls.Add(_warnBanner);
+            top.Controls.Add(_noticeBanner);
             top.Controls.Add(_resultBanner);
             return top;
+        }
+
+        private Control BuildSearchBox()
+        {
+            _txtSearch = new TextBox
+            {
+                Dock = DockStyle.Fill,
+                Font = Theme.FontRegular,
+                BorderStyle = BorderStyle.None,
+                BackColor = Color.White
+            };
+            _txtSearch.TextChanged += (s, e) => _grid.SearchText = _txtSearch.Text;
+            _txtSearch.HandleCreated += (s, e) => SendMessage(_txtSearch.Handle, EmSetCueBanner, (IntPtr)1, "Search components (Ctrl+F)");
+
+            var glyph = new Label
+            {
+                Dock = DockStyle.Right,
+                Width = 26,
+                Text = Theme.GlyphSearch,
+                Font = Theme.FontIconSmall,
+                ForeColor = Theme.TextSecondary,
+                TextAlign = ContentAlignment.MiddleCenter,
+                BackColor = Color.White
+            };
+
+            // A thin grey frame around the box, like Fluent text fields.
+            var frame = new Panel
+            {
+                Width = 280,
+                Height = 28,
+                Padding = new Padding(1),
+                BackColor = Theme.BorderStrong,
+                Anchor = AnchorStyles.Right,
+                Margin = new Padding(0, 6, 14, 2)
+            };
+            var inner = new Panel { Dock = DockStyle.Fill, BackColor = Color.White, Padding = new Padding(8, 5, 0, 0) };
+            inner.Controls.Add(_txtSearch);
+            inner.Controls.Add(glyph);
+            frame.Controls.Add(inner);
+            return frame;
         }
 
         private Control BuildLookupRow()
@@ -404,6 +639,7 @@ namespace SolutionComponentCloner.UI
         {
             _grid = new GroupedComponentGrid { Dock = DockStyle.Fill };
             _grid.ComponentSelectionChanged += (s, e) => UpdateSelectionUi();
+            _grid.ViewChanged += (s, e) => UpdateFooter();
 
             _results = new ListView
             {
@@ -501,17 +737,34 @@ namespace SolutionComponentCloner.UI
                 return;
             }
 
+            var targetChanged = target.SolutionId != _lastTargetId;
             _lastSourceId = source.SolutionId;
             _lastTargetId = target.SolutionId;
             _lblSourceLookup.Text = source.FriendlyName;
             _lblTargetLookup.Text = target.FriendlyName;
             ShowPickers(false);
+            RememberSolutions(source, target);
+
+            if (targetChanged && _grid.TotalCount > 0)
+            {
+                RefreshTargetMembership();
+            }
         }
 
         private void ShowPickers(bool show)
         {
             _pickersHost.Visible = show;
             _lookupRow.Visible = !show;
+        }
+
+        private void SetBusy(bool busy)
+        {
+            _busy = busy;
+            _commandBar.Enabled = !busy;
+            _grid.Enabled = !busy;
+            _pickersHost.Enabled = !busy;
+            _lookupRow.Enabled = !busy;
+            UpdateSelectionUi();
         }
 
         private void UpdateSelectionUi()
@@ -521,14 +774,46 @@ namespace SolutionComponentCloner.UI
 
             _cmdCopy.Text = selected > 0 ? $"Copy {selected} to target" : "Copy to target";
             _cmdCopy.Enabled = selected > 0;
+            _cmdPreview.Enabled = selected > 0;
             _cmdClear.Enabled = selected > 0;
             _cmdSelectAll.Enabled = total > 0;
             _cmdCollapse.Enabled = total > 0;
             _cmdExpand.Enabled = total > 0;
 
-            _lblFooter.Text = total == 0
-                ? "No components"
-                : $"{total} component{(total == 1 ? string.Empty : "s")} in {_grid.GroupCount} type{(_grid.GroupCount == 1 ? string.Empty : "s")} ({selected} selected)";
+            _miSaveSelection.Enabled = selected > 0;
+            _miLoadSelection.Enabled = total > 0;
+            _miModifiedSince.Enabled = total > 0;
+
+            UpdateFooter();
+        }
+
+        private void UpdateFooter()
+        {
+            var total = _grid.TotalCount;
+            if (total == 0)
+            {
+                _lblFooter.Text = "No components";
+                return;
+            }
+
+            var types = _grid.GroupCount;
+            var text = $"{total} component{(total == 1 ? string.Empty : "s")} in {types} type{(types == 1 ? string.Empty : "s")} ({_grid.SelectedCount} selected)";
+
+            if (_grid.IsFiltered)
+            {
+                text += $" · showing {_grid.VisibleCount}";
+            }
+
+            if (_targetKeys != null)
+            {
+                text += $" · {_grid.InTargetCount} already in target";
+                if (_onlyInTargetCount > 0)
+                {
+                    text += $", {_onlyInTargetCount} only in target";
+                }
+            }
+
+            _lblFooter.Text = text;
         }
 
         #endregion
@@ -564,9 +849,24 @@ namespace SolutionComponentCloner.UI
                         return;
                     }
 
-                    var solutions = (List<SolutionListItem>)args.Result;
-                    _cmbSource.SetSolutions(solutions);
-                    _cmbTarget.SetSolutions(solutions);
+                    _solutions = (List<SolutionListItem>)args.Result;
+                    _cmbSource.SetSolutions(_solutions);
+                    _cmbTarget.SetSolutions(_solutions);
+
+                    if (_pendingTargetUniqueName != null)
+                    {
+                        var created = _pendingTargetUniqueName;
+                        _pendingTargetUniqueName = null;
+                        if (_cmbTarget.SelectByUniqueName(created))
+                        {
+                            ShowNotice(BannerKind.Success, $"Solution {created} was created and selected as the target.");
+                        }
+                    }
+                    else if (_applySavedSelection)
+                    {
+                        _applySavedSelection = false;
+                        ApplySavedSolutions();
+                    }
                 }
             });
         }
@@ -581,6 +881,8 @@ namespace SolutionComponentCloner.UI
 
             ResetResults();
             _warnBanner.HideBanner();
+            _noticeBanner.HideBanner();
+            ClearTargetMembership();
             _cmdCopy.Enabled = false;
             _lblFooter.Text = "Loading components...";
 
@@ -610,6 +912,57 @@ namespace SolutionComponentCloner.UI
                             $"Names are unavailable for {loaded.Warnings.Count} component type(s); their IDs are shown instead. Hover for details.",
                             toolTip: string.Join(Environment.NewLine, loaded.Warnings));
                     }
+
+                    RefreshTargetMembership();
+                }
+            });
+        }
+
+        private void ClearTargetMembership()
+        {
+            _targetKeys = null;
+            _onlyInTargetCount = 0;
+            _grid.ClearTargetInfo();
+            _miHideExisting.Enabled = false;
+        }
+
+        private void RefreshTargetMembership()
+        {
+            var source = _cmbSource.SelectedSolution;
+            var target = _cmbTarget.SelectedSolution;
+            if (Service == null || target == null || _grid.TotalCount == 0 || (source != null && source.SolutionId == target.SolutionId))
+            {
+                ClearTargetMembership();
+                return;
+            }
+
+            WorkAsync(new WorkAsyncInfo
+            {
+                Message = $"Comparing with {target.FriendlyName}...",
+                Work = (worker, args) =>
+                {
+                    args.Result = _dataService.GetSolutionComponentKeys(Service, target.SolutionId);
+                },
+                PostWorkCallBack = args =>
+                {
+                    if (args.Error != null)
+                    {
+                        ClearTargetMembership();
+                        ShowNotice(BannerKind.Warning, "The target solution's components could not be read, so existing components are not marked.");
+                        return;
+                    }
+
+                    _targetKeys = (HashSet<(int Type, Guid Id)>)args.Result;
+                    var sourceKeys = new HashSet<(int, Guid)>(_grid.AllItems.Select(i => (i.ComponentType, i.ObjectId)));
+                    _onlyInTargetCount = _targetKeys.Count(k => !sourceKeys.Contains((k.Type, k.Id)));
+                    _grid.ApplyTargetKeys(_targetKeys);
+                    _miHideExisting.Enabled = true;
+                    if (_miHideExisting.Checked)
+                    {
+                        _grid.HideInTarget = true;
+                    }
+
+                    UpdateFooter();
                 }
             });
         }
@@ -622,6 +975,7 @@ namespace SolutionComponentCloner.UI
         {
             var target = _cmbTarget.SelectedSolution;
             var source = _cmbSource.SelectedSolution;
+
             // Tables first, so a table is already in the target when its columns, forms and views are added.
             var selected = _grid.SelectedComponents
                 .OrderBy(c => c.ComponentType == ComponentTypeCatalog.Entity ? 0 : 1)
@@ -655,37 +1009,66 @@ namespace SolutionComponentCloner.UI
                 return;
             }
 
-            var includeRequired = _chkIncludeRequired.Checked;
-            var targetUniqueName = target.UniqueName;
+            StartCopy(selected, target.UniqueName, target.FriendlyName, _chkIncludeRequired.Checked);
+        }
 
+        private void StartCopy(List<SolutionComponentItem> selected, string targetUniqueName, string targetFriendlyName, bool includeRequired)
+        {
             ResetResults();
-            _cmdCopy.Enabled = false;
+            _noticeBanner.HideBanner();
+            SetBusy(true);
+            ShowCopyProgress(0, selected.Count, targetFriendlyName);
 
-            WorkAsync(new WorkAsyncInfo
+            var worker = new BackgroundWorker { WorkerReportsProgress = true, WorkerSupportsCancellation = true };
+            _copyWorker = worker;
+
+            worker.DoWork += (s, e) =>
             {
-                Message = $"Copying {selected.Count} component(s) to {target.FriendlyName}...",
-                Work = (worker, args) =>
-                {
-                    var results = new List<ComponentCopyResult>();
-                    foreach (var component in selected)
-                    {
-                        results.Add(_dataService.CopyComponent(Service, component, targetUniqueName, includeRequired));
-                    }
-                    args.Result = results;
-                },
-                PostWorkCallBack = args =>
-                {
-                    UpdateSelectionUi();
+                var results = _dataService.CopyComponents(Service, selected, targetUniqueName, includeRequired,
+                    (done, total) => worker.ReportProgress(total == 0 ? 0 : done * 100 / total, new[] { done, total }),
+                    () => worker.CancellationPending, out var cancelled);
+                e.Result = new CopyOutcomeData { Results = results, Cancelled = cancelled };
+            };
+            worker.ProgressChanged += (s, e) =>
+            {
+                var counts = (int[])e.UserState;
+                ShowCopyProgress(counts[0], counts[1], targetFriendlyName);
+            };
+            worker.RunWorkerCompleted += (s, e) =>
+            {
+                _copyWorker = null;
+                _noticeBanner.HideBanner();
+                SetBusy(false);
 
-                    if (args.Error != null)
-                    {
-                        ShowErrorDialog(args.Error, "Solution Component Cloner", "Copy operation failed.", false);
-                        return;
-                    }
-
-                    RenderResults((List<ComponentCopyResult>)args.Result);
+                if (e.Error != null)
+                {
+                    ShowErrorDialog(e.Error, "Solution Component Cloner", "Copy operation failed.", false);
+                    return;
                 }
-            });
+
+                var data = (CopyOutcomeData)e.Result;
+                RenderResults(data.Results, selected.Count, data.Cancelled);
+
+                if (data.Results.Any(r => r.Outcome == CopyOutcome.Success))
+                {
+                    RefreshTargetMembership();
+                }
+            };
+            worker.RunWorkerAsync();
+        }
+
+        private void ShowCopyProgress(int done, int total, string targetName)
+        {
+            _noticeBanner.ShowMessage(BannerKind.Info, $"Copying {done} of {total} to {targetName}...", "Cancel", CancelCopy);
+        }
+
+        private void CancelCopy()
+        {
+            if (_copyWorker != null && _copyWorker.IsBusy)
+            {
+                _copyWorker.CancelAsync();
+                _noticeBanner.ShowMessage(BannerKind.Info, "Cancelling after the batch in progress...");
+            }
         }
 
         private void ResetResults()
@@ -693,11 +1076,11 @@ namespace SolutionComponentCloner.UI
             _results.Items.Clear();
             _lastResults = new List<ComponentCopyResult>();
             _resultBanner.HideBanner();
-            _cmdExport.Enabled = false;
+            _miExport.Enabled = false;
             HideResultDetails();
         }
 
-        private void RenderResults(List<ComponentCopyResult> results)
+        private void RenderResults(List<ComponentCopyResult> results, int requested, bool cancelled)
         {
             _results.Items.Clear();
             _lastResults = results;
@@ -714,12 +1097,17 @@ namespace SolutionComponentCloner.UI
 
             var succeeded = results.Count(r => r.Outcome == CopyOutcome.Success);
             var failed = results.Count - succeeded;
-            _cmdExport.Enabled = failed > 0;
+            _miExport.Enabled = failed > 0;
 
-            if (failed == 0)
+            if (cancelled)
+            {
+                _resultBanner.ShowMessage(BannerKind.Warning,
+                    $"Cancelled: {succeeded} copied, {failed} failed, {requested - results.Count} not attempted.", "View details", ToggleResultDetails);
+            }
+            else if (failed == 0)
             {
                 _resultBanner.ShowMessage(BannerKind.Success,
-                    $"{succeeded} component{(succeeded == 1 ? string.Empty : "s")} copied successfully.",
+                    $"{succeeded} component{(succeeded == 1 ? string.Empty : "s")} copied successfully. Publish your customizations to make them live.",
                     "View details", ToggleResultDetails);
             }
             else
@@ -813,6 +1201,210 @@ namespace SolutionComponentCloner.UI
             return value.IndexOfAny(new[] { ',', '"', '\n', '\r' }) >= 0
                 ? "\"" + value.Replace("\"", "\"\"") + "\""
                 : value;
+        }
+
+        #endregion
+
+        #region Tools
+
+        private void ShowNotice(BannerKind kind, string message)
+        {
+            _noticeBanner.ShowMessage(kind, message);
+        }
+
+        private void PreviewRequired()
+        {
+            var selected = _grid.SelectedComponents.ToList();
+            if (selected.Count == 0)
+            {
+                return;
+            }
+
+            if (selected.Count > 300 &&
+                MessageBox.Show(this, $"Checking dependencies for {selected.Count} components can take a while. Continue?", "Preview required components",
+                    MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+            {
+                return;
+            }
+
+            WorkAsync(new WorkAsyncInfo
+            {
+                Message = "Checking dependencies...",
+                Work = (worker, args) =>
+                {
+                    args.Result = _dataService.GetRequiredComponents(Service, selected, message => worker.ReportProgress(0, message));
+                },
+                ProgressChanged = e => SetWorkingMessage(e.UserState as string),
+                PostWorkCallBack = args =>
+                {
+                    if (args.Error != null)
+                    {
+                        ShowErrorDialog(args.Error, "Solution Component Cloner", "Unable to check the required components.", false);
+                        return;
+                    }
+
+                    using (var dialog = new RequiredComponentsDialog((SolutionComponentLoadResult)args.Result, selected.Count))
+                    {
+                        dialog.ShowDialog(this);
+                    }
+                }
+            });
+        }
+
+        private void PublishAllCustomizations()
+        {
+            if (MessageBox.Show(this,
+                    "Publish all customizations in this environment? This makes every unpublished change live for all users.",
+                    "Publish all customizations", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes)
+            {
+                return;
+            }
+
+            WorkAsync(new WorkAsyncInfo
+            {
+                Message = "Publishing all customizations...",
+                Work = (worker, args) => _dataService.PublishAll(Service),
+                PostWorkCallBack = args =>
+                {
+                    if (args.Error != null)
+                    {
+                        ShowErrorDialog(args.Error, "Solution Component Cloner", "Unable to publish the customizations.", false);
+                        return;
+                    }
+
+                    ShowNotice(BannerKind.Success, "All customizations were published.");
+                }
+            });
+        }
+
+        private void NewTargetSolution()
+        {
+            WorkAsync(new WorkAsyncInfo
+            {
+                Message = "Loading publishers...",
+                Work = (worker, args) =>
+                {
+                    args.Result = _dataService.GetPublishers(Service);
+                },
+                PostWorkCallBack = args =>
+                {
+                    if (args.Error != null)
+                    {
+                        ShowErrorDialog(args.Error, "Solution Component Cloner", "Unable to load the publishers.", false);
+                        return;
+                    }
+
+                    var publishers = (List<PublisherListItem>)args.Result;
+                    using (var dialog = new NewSolutionDialog(publishers, _solutions.Select(s => s.UniqueName)))
+                    {
+                        if (dialog.ShowDialog(this) != DialogResult.OK)
+                        {
+                            return;
+                        }
+
+                        CreateSolution(dialog.FriendlyName, dialog.UniqueName, dialog.Version, dialog.Publisher.PublisherId);
+                    }
+                }
+            });
+        }
+
+        private void CreateSolution(string friendlyName, string uniqueName, string version, Guid publisherId)
+        {
+            WorkAsync(new WorkAsyncInfo
+            {
+                Message = $"Creating {friendlyName}...",
+                Work = (worker, args) =>
+                {
+                    args.Result = _dataService.CreateSolution(Service, friendlyName, uniqueName, version, publisherId);
+                },
+                PostWorkCallBack = args =>
+                {
+                    if (args.Error != null)
+                    {
+                        ShowErrorDialog(args.Error, "Solution Component Cloner", "Unable to create the solution.", false);
+                        return;
+                    }
+
+                    _pendingTargetUniqueName = uniqueName;
+                    LoadSolutionsAsync();
+                }
+            });
+        }
+
+        private void SaveSelection()
+        {
+            var selected = _grid.SelectedComponents.ToList();
+            if (selected.Count == 0)
+            {
+                return;
+            }
+
+            var source = _cmbSource.SelectedSolution;
+            using (var dialog = new SaveFileDialog
+            {
+                Filter = "Saved selection (*.json)|*.json",
+                FileName = (source?.UniqueName ?? "components") + "-selection.json"
+            })
+            {
+                if (dialog.ShowDialog(this) != DialogResult.OK)
+                {
+                    return;
+                }
+
+                try
+                {
+                    SelectionFile.Save(dialog.FileName, SelectionFile.FromSelection(selected, source?.FriendlyName));
+                    ShowNotice(BannerKind.Success, $"Saved {selected.Count} selected component(s) to {Path.GetFileName(dialog.FileName)}.");
+                }
+                catch (Exception ex)
+                {
+                    ShowErrorDialog(ex, "Solution Component Cloner", "Unable to save the selection.", false);
+                }
+            }
+        }
+
+        private void LoadSelection()
+        {
+            using (var dialog = new OpenFileDialog { Filter = "Saved selection (*.json)|*.json|All files (*.*)|*.*" })
+            {
+                if (dialog.ShowDialog(this) != DialogResult.OK)
+                {
+                    return;
+                }
+
+                try
+                {
+                    var document = SelectionFile.Load(dialog.FileName);
+                    var (matched, missing) = SelectionFile.Apply(_grid.AllItems.ToList(), document);
+                    _grid.NotifySelectionChanged();
+
+                    var message = $"Selected {matched} of {document.Components.Count} saved component(s).";
+                    if (missing > 0)
+                    {
+                        message += $" {missing} were not found in this solution.";
+                    }
+
+                    ShowNotice(missing > 0 ? BannerKind.Warning : BannerKind.Success, message);
+                }
+                catch (Exception ex)
+                {
+                    ShowErrorDialog(ex, "Solution Component Cloner", "Unable to read the selection file.", false);
+                }
+            }
+        }
+
+        private void SelectModifiedSince()
+        {
+            using (var dialog = new DatePromptDialog("Select modified since", "Select components modified on or after:", DateTime.Today.AddDays(-7)))
+            {
+                if (dialog.ShowDialog(this) != DialogResult.OK)
+                {
+                    return;
+                }
+
+                var count = _grid.SelectModifiedSince(dialog.Value);
+                ShowNotice(BannerKind.Info, $"Selected {count} component(s) modified since {dialog.Value:yyyy-MM-dd HH:mm}.");
+            }
         }
 
         #endregion

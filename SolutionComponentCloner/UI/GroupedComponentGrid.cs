@@ -12,6 +12,7 @@ namespace SolutionComponentCloner.UI
     /// <summary>
     /// A virtual, custom-painted tree grid in the style of the Power Apps solution explorer: components are
     /// grouped by type, tables hold their columns/forms/views/etc., and every folder has a tri-state checkbox.
+    /// It can be searched, sorted and filtered without losing which folders were open.
     /// </summary>
     internal sealed class GroupedComponentGrid : DataGridView
     {
@@ -23,15 +24,67 @@ namespace SolutionComponentCloner.UI
         private const int LabelOffset = 50;
         private const string AppWarning = "Adds every entity, form and process the app is built from";
 
+        private const int ColComponent = 0;
+        private const int ColNote = 1;
+        private const int ColModified = 2;
+        private const int ColModifiedBy = 3;
+        private const int ColState = 4;
+
+        private List<SolutionComponentItem> _allItems = new List<SolutionComponentItem>();
         private List<ComponentNode> _roots = new List<ComponentNode>();
         private readonly List<ComponentNode> _rows = new List<ComponentNode>();
+        private readonly HashSet<string> _collapsedKeys = new HashSet<string>();
+        private readonly HashSet<string> _expandedKeys = new HashSet<string>();
+        private bool _defaultCollapsed;
+        private string _searchText = string.Empty;
+        private bool _hideInTarget;
+        private ComponentSort _sort = new ComponentSort { Column = ComponentSortColumn.Name };
+        private int _visibleCount;
 
         public event EventHandler ComponentSelectionChanged;
+        public event EventHandler ViewChanged;
 
-        public int TotalCount => _roots.Sum(r => r.ItemCount);
+        public bool ShowCheckBoxes { get; set; } = true;
+
+        public IReadOnlyList<SolutionComponentItem> AllItems => _allItems;
+        public int TotalCount => _allItems.Count;
+        public int VisibleCount => _visibleCount;
         public int GroupCount => _roots.Count;
-        public int SelectedCount => _roots.Sum(r => r.SelectedCount);
-        public IEnumerable<SolutionComponentItem> SelectedComponents => _roots.SelectMany(r => r.SubtreeItems()).Where(i => i.Selected);
+        public int SelectedCount => _allItems.Count(i => i.Selected);
+        public int InTargetCount => _allItems.Count(i => i.InTarget);
+        public bool IsFiltered => !string.IsNullOrWhiteSpace(_searchText) || _hideInTarget;
+        public IEnumerable<SolutionComponentItem> SelectedComponents => _allItems.Where(i => i.Selected);
+
+        public string SearchText
+        {
+            get => _searchText;
+            set
+            {
+                value = value ?? string.Empty;
+                if (value == _searchText)
+                {
+                    return;
+                }
+
+                _searchText = value;
+                ApplyView();
+            }
+        }
+
+        public bool HideInTarget
+        {
+            get => _hideInTarget;
+            set
+            {
+                if (value == _hideInTarget)
+                {
+                    return;
+                }
+
+                _hideInTarget = value;
+                ApplyView();
+            }
+        }
 
         public GroupedComponentGrid()
         {
@@ -58,59 +111,152 @@ namespace SolutionComponentCloner.UI
             ColumnHeadersDefaultCellStyle.BackColor = Color.White;
             ColumnHeadersDefaultCellStyle.SelectionBackColor = Color.White;
 
-            Columns.Add(new DataGridViewTextBoxColumn
-            {
-                HeaderText = "Component",
-                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-                FillWeight = 64,
-                SortMode = DataGridViewColumnSortMode.NotSortable
-            });
-            Columns.Add(new DataGridViewTextBoxColumn
-            {
-                HeaderText = "Note",
-                AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill,
-                FillWeight = 36,
-                SortMode = DataGridViewColumnSortMode.NotSortable
-            });
+            AddColumn("Component", fillWeight: 52);
+            AddColumn("Note", fillWeight: 28);
+            AddColumn("Modified", width: 128);
+            AddColumn("Modified by", width: 140);
+            AddColumn("State", width: 84);
 
             CellValueNeeded += (s, e) => e.Value = string.Empty;
             CellPainting += OnCellPainting;
             CellMouseClick += OnCellMouseClick;
-            ColumnHeaderMouseClick += (s, e) =>
+            ColumnHeaderMouseClick += OnHeaderMouseClick;
+        }
+
+        private void AddColumn(string header, float fillWeight = 0, int width = 0)
+        {
+            var column = new DataGridViewTextBoxColumn
             {
-                if (e.ColumnIndex == 0 && e.Button == MouseButtons.Left && e.X >= CheckBoxOffset - 4 && e.X <= CheckBoxOffset + CheckBoxSize + 4)
-                {
-                    SetAllSelected(SelectedCount != TotalCount);
-                }
+                HeaderText = header,
+                SortMode = DataGridViewColumnSortMode.NotSortable
             };
+
+            if (width > 0)
+            {
+                column.Width = width;
+                column.Resizable = DataGridViewTriState.False;
+            }
+            else
+            {
+                column.AutoSizeMode = DataGridViewAutoSizeColumnMode.Fill;
+                column.FillWeight = fillWeight;
+            }
+
+            Columns.Add(column);
         }
 
         public void SetItems(IEnumerable<SolutionComponentItem> items)
         {
-            var list = items.ToList();
-            _roots = ComponentTreeBuilder.Build(list);
-
-            if (list.Count > AutoCollapseThreshold)
-            {
-                foreach (var node in ComponentTreeBuilder.AllNodes(_roots))
-                {
-                    node.Collapsed = true;
-                }
-            }
-
-            Rebuild();
+            _allItems = items.ToList();
+            _collapsedKeys.Clear();
+            _expandedKeys.Clear();
+            _defaultCollapsed = _allItems.Count > AutoCollapseThreshold;
+            ApplyView();
             RaiseSelectionChanged();
         }
 
-        public void SetAllSelected(bool selected)
+        public void ApplyTargetKeys(HashSet<(int Type, Guid Id)> keys)
         {
-            foreach (var item in _roots.SelectMany(r => r.SubtreeItems()))
+            foreach (var item in _allItems)
             {
-                item.Selected = selected;
+                item.InTarget = keys != null && keys.Contains((item.ComponentType, item.ObjectId));
             }
 
+            ApplyView();
+        }
+
+        public void ClearTargetInfo() => ApplyTargetKeys(null);
+
+        public void NotifySelectionChanged()
+        {
             Invalidate();
             RaiseSelectionChanged();
+        }
+
+        private IEnumerable<SolutionComponentItem> VisibleItems => _roots.SelectMany(r => r.SubtreeItems());
+
+        private void ApplyView()
+        {
+            var visible = _allItems
+                .Where(i => ComponentFilter.Matches(i, _searchText) && !(_hideInTarget && i.InTarget))
+                .ToList();
+            _visibleCount = visible.Count;
+            _roots = ComponentTreeBuilder.Build(visible, _sort);
+
+            var searching = !string.IsNullOrWhiteSpace(_searchText);
+            foreach (var node in ComponentTreeBuilder.AllNodes(_roots))
+            {
+                node.Collapsed = node.HasChildren && !searching && IsCollapsed(node.Key);
+            }
+
+            Rebuild();
+            ViewChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        private bool IsCollapsed(string key) => _defaultCollapsed ? !_expandedKeys.Contains(key) : _collapsedKeys.Contains(key);
+
+        private void SetKeyCollapsed(string key, bool collapsed)
+        {
+            if (_defaultCollapsed)
+            {
+                if (collapsed) { _expandedKeys.Remove(key); } else { _expandedKeys.Add(key); }
+            }
+            else
+            {
+                if (collapsed) { _collapsedKeys.Add(key); } else { _collapsedKeys.Remove(key); }
+            }
+        }
+
+        public void SelectVisible()
+        {
+            foreach (var item in VisibleItems)
+            {
+                item.Selected = true;
+            }
+
+            NotifySelectionChanged();
+        }
+
+        public void ClearComponentSelection()
+        {
+            foreach (var item in _allItems)
+            {
+                item.Selected = false;
+            }
+
+            NotifySelectionChanged();
+        }
+
+        /// <summary>Select all ticks what is shown (so a search narrows it); clearing always clears everything.</summary>
+        public void SetAllSelected(bool selected)
+        {
+            if (selected) { SelectVisible(); } else { ClearComponentSelection(); }
+        }
+
+        private void ToggleVisibleSelection()
+        {
+            var visible = VisibleItems.ToList();
+            var selectAll = visible.Any(i => !i.Selected);
+            foreach (var item in visible)
+            {
+                item.Selected = selectAll;
+            }
+
+            NotifySelectionChanged();
+        }
+
+        /// <summary>Ticks every shown component modified on or after the date; returns how many.</summary>
+        public int SelectModifiedSince(DateTime since)
+        {
+            var count = 0;
+            foreach (var item in VisibleItems.Where(i => i.ModifiedOn.HasValue && i.ModifiedOn.Value >= since))
+            {
+                item.Selected = true;
+                count++;
+            }
+
+            NotifySelectionChanged();
+            return count;
         }
 
         public void ExpandAll() => SetAllCollapsed(false);
@@ -119,12 +265,20 @@ namespace SolutionComponentCloner.UI
 
         private void SetAllCollapsed(bool collapsed)
         {
-            foreach (var node in ComponentTreeBuilder.AllNodes(_roots))
+            foreach (var node in ComponentTreeBuilder.AllNodes(_roots).Where(n => n.HasChildren))
             {
-                node.Collapsed = collapsed;
+                SetKeyCollapsed(node.Key, collapsed);
             }
 
-            Rebuild();
+            ApplyView();
+        }
+
+        private void SetSort(ComponentSortColumn column)
+        {
+            _sort = _sort.Column == column
+                ? new ComponentSort { Column = column, Descending = !_sort.Descending }
+                : new ComponentSort { Column = column };
+            ApplyView();
         }
 
         private void Rebuild()
@@ -157,6 +311,11 @@ namespace SolutionComponentCloner.UI
             }
 
             node.Collapsed = !node.Collapsed;
+            if (string.IsNullOrWhiteSpace(_searchText))
+            {
+                SetKeyCollapsed(node.Key, node.Collapsed);
+            }
+
             Rebuild();
 
             var index = _rows.IndexOf(node);
@@ -168,6 +327,11 @@ namespace SolutionComponentCloner.UI
 
         private void ToggleSelection(ComponentNode node)
         {
+            if (!ShowCheckBoxes)
+            {
+                return;
+            }
+
             var items = node.SubtreeItems().ToList();
             var selectAll = items.Any(i => !i.Selected);
             foreach (var item in items)
@@ -175,8 +339,7 @@ namespace SolutionComponentCloner.UI
                 item.Selected = selectAll;
             }
 
-            Invalidate();
-            RaiseSelectionChanged();
+            NotifySelectionChanged();
         }
 
         private static int ChevronX(ComponentNode node) => ChevronOffset + node.Depth * IndentStep;
@@ -185,15 +348,62 @@ namespace SolutionComponentCloner.UI
 
         private static int LabelX(ComponentNode node) => LabelOffset + node.Depth * IndentStep;
 
+        private void OnHeaderMouseClick(object sender, DataGridViewCellMouseEventArgs e)
+        {
+            if (e.Button != MouseButtons.Left)
+            {
+                return;
+            }
+
+            switch (e.ColumnIndex)
+            {
+                case ColComponent:
+                    if (ShowCheckBoxes && e.X >= CheckBoxOffset - 4 && e.X <= CheckBoxOffset + CheckBoxSize + 4)
+                    {
+                        ToggleVisibleSelection();
+                    }
+                    else
+                    {
+                        SetSort(ComponentSortColumn.Name);
+                    }
+                    break;
+                case ColModified:
+                    SetSort(ComponentSortColumn.Modified);
+                    break;
+                case ColModifiedBy:
+                    SetSort(ComponentSortColumn.ModifiedBy);
+                    break;
+                case ColState:
+                    SetSort(ComponentSortColumn.State);
+                    break;
+            }
+        }
+
         private void OnCellMouseClick(object sender, DataGridViewCellMouseEventArgs e)
         {
-            if (e.RowIndex < 0 || e.RowIndex >= _rows.Count || e.Button != MouseButtons.Left)
+            if (e.RowIndex < 0 || e.RowIndex >= _rows.Count)
             {
                 return;
             }
 
             var node = _rows[e.RowIndex];
-            var onCheckBox = e.ColumnIndex == 0 && e.X >= CheckBoxX(node) - 4 && e.X <= CheckBoxX(node) + CheckBoxSize + 4;
+
+            if (e.Button == MouseButtons.Right)
+            {
+                if (node.IsTable && node.Item != null && ShowCheckBoxes)
+                {
+                    ShowSubcomponentMenu(node, e);
+                }
+
+                return;
+            }
+
+            if (e.Button != MouseButtons.Left)
+            {
+                return;
+            }
+
+            var onCheckBox = e.ColumnIndex == ColComponent && e.X >= CheckBoxX(node) - 4 && e.X <= CheckBoxX(node) + CheckBoxSize + 4;
 
             if (onCheckBox)
             {
@@ -205,13 +415,35 @@ namespace SolutionComponentCloner.UI
             }
         }
 
+        private void ShowSubcomponentMenu(ComponentNode node, DataGridViewCellMouseEventArgs e)
+        {
+            var menu = new ContextMenuStrip();
+            AddModeItem(menu, node, "Follow the \"Include required components\" checkbox", SubcomponentMode.UseGlobalSetting);
+            AddModeItem(menu, node, "Include all of the table's subcomponents", SubcomponentMode.IncludeAll);
+            AddModeItem(menu, node, "Only the subcomponents I ticked", SubcomponentMode.OnlySelected);
+
+            var cell = GetCellDisplayRectangle(e.ColumnIndex, e.RowIndex, false);
+            menu.Show(this, new Point(cell.Left + e.X, cell.Top + e.Y));
+        }
+
+        private void AddModeItem(ContextMenuStrip menu, ComponentNode node, string text, SubcomponentMode mode)
+        {
+            var item = new ToolStripMenuItem(text) { Checked = node.Item.SubcomponentMode == mode };
+            item.Click += (s, args) =>
+            {
+                node.Item.SubcomponentMode = mode;
+                Invalidate();
+            };
+            menu.Items.Add(item);
+        }
+
         protected override bool ProcessDataGridViewKey(KeyEventArgs e)
         {
             if (CurrentCell != null && CurrentCell.RowIndex >= 0 && CurrentCell.RowIndex < _rows.Count)
             {
                 var node = _rows[CurrentCell.RowIndex];
 
-                if (e.KeyCode == Keys.Space)
+                if (e.KeyCode == Keys.Space && ShowCheckBoxes)
                 {
                     ToggleSelection(node);
                     return true;
@@ -275,7 +507,7 @@ namespace SolutionComponentCloner.UI
             {
                 background = rowSelected ? Theme.Pressed : Theme.GroupBackground;
             }
-            else if (state == CheckState.Checked)
+            else if (state == CheckState.Checked && ShowCheckBoxes)
             {
                 background = rowSelected ? Theme.AccentSelected : Theme.AccentSoft;
             }
@@ -294,21 +526,83 @@ namespace SolutionComponentCloner.UI
                 g.DrawLine(pen, bounds.Left, bounds.Bottom - 1, bounds.Right, bounds.Bottom - 1);
             }
 
-            if (e.ColumnIndex == 0)
+            switch (e.ColumnIndex)
             {
-                PaintTreeCell(g, bounds, node, state);
-            }
-            else if (node.Item != null && !node.HasChildren && node.Item.ComponentType == ComponentTypeCatalog.ModelDrivenApp)
-            {
-                TextRenderer.DrawText(g, AppWarning, Theme.FontRegular,
-                    new Rectangle(bounds.Left + 6, bounds.Top, Math.Max(0, bounds.Width - 6), bounds.Height), Theme.Danger,
-                    TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
+                case ColComponent:
+                    PaintTreeCell(g, bounds, node, state);
+                    break;
+                case ColNote:
+                    PaintNote(g, bounds, node);
+                    break;
+                case ColModified:
+                    PaintText(g, bounds, node.Item?.ModifiedOn?.ToString("yyyy-MM-dd HH:mm"));
+                    break;
+                case ColModifiedBy:
+                    PaintText(g, bounds, node.Item?.ModifiedBy);
+                    break;
+                case ColState:
+                    PaintText(g, bounds, node.Item?.IsManaged == true ? "Managed" : node.Item?.IsManaged == false ? "Unmanaged" : null);
+                    break;
             }
 
             e.Handled = true;
         }
 
-        private static void PaintTreeCell(Graphics g, Rectangle bounds, ComponentNode node, CheckState state)
+        private static void PaintText(Graphics g, Rectangle bounds, string text)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return;
+            }
+
+            TextRenderer.DrawText(g, text, Theme.FontRegular,
+                new Rectangle(bounds.Left + 6, bounds.Top, Math.Max(0, bounds.Width - 6), bounds.Height), Theme.TextSecondary,
+                TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
+        }
+
+        private static void PaintNote(Graphics g, Rectangle bounds, ComponentNode node)
+        {
+            var item = node.Item;
+            if (item == null)
+            {
+                return;
+            }
+
+            var notes = new List<string>();
+            var color = Theme.TextSecondary;
+
+            if (!node.HasChildren && item.ComponentType == ComponentTypeCatalog.ModelDrivenApp)
+            {
+                notes.Add(AppWarning);
+                color = Theme.Danger;
+            }
+
+            if (item.ComponentType == ComponentTypeCatalog.Entity && item.SubcomponentMode != SubcomponentMode.UseGlobalSetting)
+            {
+                notes.Add(item.SubcomponentMode == SubcomponentMode.IncludeAll ? "Includes all subcomponents" : "Only ticked subcomponents");
+            }
+
+            if (item.InTarget)
+            {
+                notes.Add("Already in target");
+            }
+
+            PaintTextColored(g, bounds, string.Join(" · ", notes), color);
+        }
+
+        private static void PaintTextColored(Graphics g, Rectangle bounds, string text, Color color)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return;
+            }
+
+            TextRenderer.DrawText(g, text, Theme.FontRegular,
+                new Rectangle(bounds.Left + 6, bounds.Top, Math.Max(0, bounds.Width - 6), bounds.Height), color,
+                TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
+        }
+
+        private void PaintTreeCell(Graphics g, Rectangle bounds, ComponentNode node, CheckState state)
         {
             if (node.HasChildren)
             {
@@ -317,8 +611,11 @@ namespace SolutionComponentCloner.UI
                     TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
             }
 
-            var checkRect = new Rectangle(bounds.Left + CheckBoxX(node), bounds.Top + (bounds.Height - CheckBoxSize) / 2, CheckBoxSize, CheckBoxSize);
-            DrawCheckBox(g, checkRect, state);
+            if (ShowCheckBoxes)
+            {
+                var checkRect = new Rectangle(bounds.Left + CheckBoxX(node), bounds.Top + (bounds.Height - CheckBoxSize) / 2, CheckBoxSize, CheckBoxSize);
+                DrawCheckBox(g, checkRect, state);
+            }
 
             var area = new Rectangle(bounds.Left + LabelX(node), bounds.Top, Math.Max(0, bounds.Width - LabelX(node)), bounds.Height);
             const TextFormatFlags flags = TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis;
@@ -336,7 +633,7 @@ namespace SolutionComponentCloner.UI
 
             var selected = node.SelectedCount;
             var count = node.IsTable ? string.Empty : $"  ({node.DisplayCount})";
-            if (selected > 0)
+            if (selected > 0 && ShowCheckBoxes)
             {
                 count += (count.Length == 0 ? "  " : string.Empty) + $" · {selected} selected";
             }
@@ -359,20 +656,44 @@ namespace SolutionComponentCloner.UI
             }
 
             var textLeft = bounds.Left + 6;
-            if (e.ColumnIndex == 0)
+            if (e.ColumnIndex == ColComponent)
             {
-                var state = TotalCount == 0 || SelectedCount == 0 ? CheckState.Unchecked
-                    : SelectedCount == TotalCount ? CheckState.Checked
-                    : CheckState.Indeterminate;
-                DrawCheckBox(g, new Rectangle(bounds.Left + CheckBoxOffset, bounds.Top + (bounds.Height - CheckBoxSize) / 2, CheckBoxSize, CheckBoxSize), state);
+                if (ShowCheckBoxes)
+                {
+                    var visible = VisibleItems.ToList();
+                    var selected = visible.Count(i => i.Selected);
+                    var state = selected == 0 ? CheckState.Unchecked : selected == visible.Count ? CheckState.Checked : CheckState.Indeterminate;
+                    DrawCheckBox(g, new Rectangle(bounds.Left + CheckBoxOffset, bounds.Top + (bounds.Height - CheckBoxSize) / 2, CheckBoxSize, CheckBoxSize), state);
+                }
+
                 textLeft = bounds.Left + LabelOffset;
             }
 
-            TextRenderer.DrawText(g, Columns[e.ColumnIndex].HeaderText, Theme.FontBold,
+            var header = Columns[e.ColumnIndex].HeaderText;
+            TextRenderer.DrawText(g, header, Theme.FontBold,
                 new Rectangle(textLeft, bounds.Top, Math.Max(0, bounds.Right - textLeft), bounds.Height), Theme.TextPrimary,
                 TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.NoPadding);
 
+            if (SortColumnIndex() == e.ColumnIndex)
+            {
+                var textWidth = TextRenderer.MeasureText(header, Theme.FontBold, Size.Empty, TextFormatFlags.NoPadding).Width;
+                TextRenderer.DrawText(g, _sort.Descending ? Theme.GlyphChevronDown : Theme.GlyphChevronUp, Theme.FontIconSmall,
+                    new Rectangle(textLeft + textWidth + 6, bounds.Top, 14, bounds.Height), Theme.TextSecondary,
+                    TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            }
+
             e.Handled = true;
+        }
+
+        private int SortColumnIndex()
+        {
+            switch (_sort.Column)
+            {
+                case ComponentSortColumn.Modified: return ColModified;
+                case ComponentSortColumn.ModifiedBy: return ColModifiedBy;
+                case ComponentSortColumn.State: return ColState;
+                default: return ColComponent;
+            }
         }
 
         private static void DrawCheckBox(Graphics g, Rectangle rect, CheckState state)

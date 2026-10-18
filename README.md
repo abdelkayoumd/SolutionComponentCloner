@@ -11,15 +11,23 @@ solution into another, browsing the source solution the way the Power Apps solut
   columns, relationships, keys, forms, views, charts, dashboards and business rules, and web resources are
   split into Code, Data and Images. Folders show counts, such as "Web resources (19)".
 - **Select exactly what you need** – every folder has a tri-state checkbox, so one click selects everything
-  inside it. Select all, Clear selection, and Expand / Collapse all are one click away. Large solutions open
-  collapsed so every type fits on one screen.
-- **Include required components** – optionally add each component's dependencies too (the same behaviour as
-  `AddRequiredComponents` on `AddSolutionComponentRequest`), or copy only what you ticked.
-- **Safe copying** – only unmanaged solutions are accepted as a target. Tables are copied before their
-  columns, forms and views, and Model-driven apps carry a warning because they always pull in everything
-  they are built from.
+  inside it. Large solutions open collapsed so every type fits on one screen.
+- **Search, sort and filter** – a search box narrows the tree as you type (Ctrl+F), the Modified, Modified by
+  and State columns are sortable, and *Select modified since...* ticks everything changed after a date.
+- **See what the target already has** – components already in the target solution are marked, can be hidden,
+  and are counted in the footer, so you don't copy things twice.
+- **Include required components** – optionally add each component's dependencies too, or copy only what you
+  ticked. *Preview* lists exactly which dependencies would come along, and each table can override the setting
+  from its right-click menu (include all subcomponents, or only the ones you ticked).
+- **Safe, visible copying** – only unmanaged solutions are accepted as a target. Copying runs in batches with a
+  live "n of m" count and a Cancel button. Tables are copied before their columns, forms and views, and
+  Model-driven apps carry a warning because they always pull in everything they are built from.
 - **Clear results** – a banner summarises how many components were copied or failed, with a per-component
   list one click away. Failures can be exported to CSV.
+- **Everything around the copy** – *Publish all customizations* afterwards, *New target solution...* without
+  leaving the tool, and *Save selection / Load selection* to repeat the same copy on another environment.
+- **Remembers your choices** – the last source and target per connection and the *Include required* setting.
+  Solutions are listed newest first, with their creation date.
 - **Readable names everywhere** – including custom and ISV component types, which are resolved through
   `solutioncomponentdefinition`. Solutions and components with thousands of rows are loaded in full.
 

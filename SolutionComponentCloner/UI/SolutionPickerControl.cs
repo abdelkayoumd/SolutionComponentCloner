@@ -57,6 +57,7 @@ namespace SolutionComponentCloner.UI
             };
             _listView.Columns.Add("Solution", 0);
             _listView.Columns.Add("Unique name", 0);
+            _listView.Columns.Add("Created", 0);
             _listView.SelectedIndexChanged += (s, e) => SelectionChanged?.Invoke(this, EventArgs.Empty);
             _listView.Resize += (s, e) => ResizeColumns();
 
@@ -94,6 +95,7 @@ namespace SolutionComponentCloner.UI
                     Tag = solution
                 };
                 item.SubItems.Add(solution.UniqueName);
+                item.SubItems.Add(solution.CreatedOn?.ToLocalTime().ToString("yyyy-MM-dd") ?? string.Empty);
                 item.Selected = idToPreserve.HasValue && solution.SolutionId == idToPreserve.Value;
                 _listView.Items.Add(item);
             }
@@ -103,14 +105,45 @@ namespace SolutionComponentCloner.UI
 
         private void ResizeColumns()
         {
-            if (_listView.Columns.Count < 2 || _listView.Width <= 0)
+            if (_listView.Columns.Count < 3 || _listView.Width <= 0)
             {
                 return;
             }
 
-            var nameWidth = (int)(_listView.ClientSize.Width * 0.6);
+            var total = _listView.ClientSize.Width;
+            var nameWidth = (int)(total * 0.46);
+            var createdWidth = (int)(total * 0.18);
             _listView.Columns[0].Width = nameWidth;
-            _listView.Columns[1].Width = Math.Max(0, _listView.ClientSize.Width - nameWidth);
+            _listView.Columns[1].Width = Math.Max(0, total - nameWidth - createdWidth);
+            _listView.Columns[2].Width = createdWidth;
+        }
+
+        /// <summary>Selects the solution with this unique name, if it is in the list; returns whether it was found.</summary>
+        public bool SelectByUniqueName(string uniqueName)
+        {
+            if (string.IsNullOrEmpty(uniqueName))
+            {
+                return false;
+            }
+
+            var solution = _all.FirstOrDefault(s => string.Equals(s.UniqueName, uniqueName, StringComparison.OrdinalIgnoreCase));
+            if (solution == null)
+            {
+                return false;
+            }
+
+            _filterBox.Text = string.Empty;
+            foreach (ListViewItem item in _listView.Items)
+            {
+                if (item.Tag is SolutionListItem listed && listed.SolutionId == solution.SolutionId)
+                {
+                    item.Selected = true;
+                    item.EnsureVisible();
+                    return true;
+                }
+            }
+
+            return false;
         }
     }
 }

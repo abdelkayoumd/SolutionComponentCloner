@@ -4,7 +4,7 @@ using System.Windows.Forms;
 
 namespace SolutionComponentCloner.UI
 {
-    internal enum BannerKind { Success, Error, Warning }
+    internal enum BannerKind { Success, Error, Warning, Info }
 
     /// <summary>A Dynamics-style form notification: a coloured strip with an icon, a message and an optional link.</summary>
     internal sealed class Banner : Panel
@@ -65,6 +65,8 @@ namespace SolutionComponentCloner.UI
                     background = Theme.SuccessBackground; foreground = Theme.Success; glyph = Theme.GlyphCheck; break;
                 case BannerKind.Error:
                     background = Theme.DangerBackground; foreground = Theme.Danger; glyph = Theme.GlyphError; break;
+                case BannerKind.Info:
+                    background = Theme.AccentSoft; foreground = Theme.AccentDark; glyph = Theme.GlyphInfo; break;
                 default:
                     background = Theme.WarningBackground; foreground = Theme.Warning; glyph = Theme.GlyphWarning; break;
             }
