@@ -7,7 +7,7 @@ namespace SolutionComponentCloner.UI
     /// <summary>A flat command-bar item: a blue glyph followed by a label, like the Dynamics 365 command bar.</summary>
     internal sealed class CommandButton : Control
     {
-        private const int HorizontalPadding = 10;
+        private const int HorizontalPadding = 8;
         private const int GlyphGap = 6;
         private bool _hover;
         private bool _down;

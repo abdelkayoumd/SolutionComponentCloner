@@ -31,7 +31,6 @@
     <Reference Include="System.Drawing" />
     <Reference Include="System.Configuration" />
     <Reference Include="System.ComponentModel.Composition" />
-    <Reference Include="System.Runtime.Serialization" />
   </ItemGroup>
 
   <ItemGroup>

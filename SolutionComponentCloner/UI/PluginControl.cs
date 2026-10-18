@@ -39,9 +39,6 @@ namespace SolutionComponentCloner.UI
         private Guid? _lastSourceId;
         private Guid? _lastTargetId;
         private List<SolutionListItem> _solutions = new List<SolutionListItem>();
-        private Guid _connectionId;
-        private bool _applySavedSelection;
-        private bool _applyingSettings;
         private string _pendingTargetUniqueName;
 
         private FlowLayoutPanel _commandBar;
@@ -52,18 +49,14 @@ namespace SolutionComponentCloner.UI
         private CommandButton _cmdCollapse;
         private CommandButton _cmdExpand;
         private CommandButton _cmdRefresh;
-        private CommandButton _cmdMore;
+        private CommandButton _cmdPublish;
+        private CommandButton _cmdNewSolution;
+        private CommandButton _cmdModifiedSince;
+        private CommandButton _cmdExport;
         private Control _optionsRow;
         private CheckBox _chkIncludeRequired;
         private CheckBox _chkHideExisting;
         private TextBox _txtSearch;
-        private ContextMenuStrip _moreMenu;
-        private ToolStripMenuItem _miPublish;
-        private ToolStripMenuItem _miNewSolution;
-        private ToolStripMenuItem _miSaveSelection;
-        private ToolStripMenuItem _miLoadSelection;
-        private ToolStripMenuItem _miModifiedSince;
-        private ToolStripMenuItem _miExport;
 
         private Banner _warnBanner;
         private Banner _noticeBanner;
@@ -93,8 +86,6 @@ namespace SolutionComponentCloner.UI
             _lblConnection.Text = e.ConnectionDetail != null
                 ? $"Connected to {e.ConnectionDetail.OrganizationFriendlyName}"
                 : "Connected";
-            _connectionId = e.ConnectionDetail?.ConnectionId ?? Guid.Empty;
-            _applySavedSelection = true;
 
             LoadSolutionsAsync();
         }
@@ -125,39 +116,6 @@ namespace SolutionComponentCloner.UI
             catch (Exception)
             {
                 // Not being able to remember a preference should never interrupt the user.
-            }
-        }
-
-        private void RememberSolutions(SolutionListItem source, SolutionListItem target)
-        {
-            if (_connectionId == Guid.Empty || _applyingSettings)
-            {
-                return;
-            }
-
-            var preference = _settings.GetOrAdd(_connectionId);
-            preference.SourceUniqueName = source.UniqueName;
-            preference.TargetUniqueName = target.UniqueName;
-            SaveSettings();
-        }
-
-        private void ApplySavedSolutions()
-        {
-            var preference = _connectionId == Guid.Empty ? null : _settings.ForConnection(_connectionId);
-            if (preference == null)
-            {
-                return;
-            }
-
-            _applyingSettings = true;
-            try
-            {
-                _cmbSource.SelectByUniqueName(preference.SourceUniqueName);
-                _cmbTarget.SelectByUniqueName(preference.TargetUniqueName);
-            }
-            finally
-            {
-                _applyingSettings = false;
             }
         }
 
@@ -287,68 +245,53 @@ namespace SolutionComponentCloner.UI
             _cmdClear = new CommandButton { Glyph = Theme.GlyphClearSelection, Text = "Clear" };
             _cmdClear.Click += (s, e) => _grid.SetAllSelected(false);
 
-            _cmdCollapse = new CommandButton { Glyph = Theme.GlyphCollapse, Text = "Collapse all" };
+            _cmdCollapse = new CommandButton { Glyph = Theme.GlyphCollapse, Text = "Collapse" };
             _cmdCollapse.Click += (s, e) => _grid.CollapseAll();
 
-            _cmdExpand = new CommandButton { Glyph = Theme.GlyphExpand, Text = "Expand all" };
+            _cmdExpand = new CommandButton { Glyph = Theme.GlyphExpand, Text = "Expand" };
             _cmdExpand.Click += (s, e) => _grid.ExpandAll();
 
             _cmdRefresh = new CommandButton { Glyph = Theme.GlyphRefresh, Text = "Refresh" };
             _cmdRefresh.Click += (s, e) => ExecuteMethod(RefreshData);
 
-            _cmdMore = new CommandButton { Glyph = Theme.GlyphMore, Text = "More" };
-            _cmdMore.Click += (s, e) => _moreMenu.Show(_cmdMore, new Point(0, _cmdMore.Height));
-            BuildMoreMenu();
+            _cmdModifiedSince = new CommandButton { Glyph = Theme.GlyphCalendar, Text = "Modified since" };
+            _cmdModifiedSince.Click += (s, e) => SelectModifiedSince();
+
+            _cmdNewSolution = new CommandButton { Glyph = Theme.GlyphAdd, Text = "New solution" };
+            _cmdNewSolution.Click += (s, e) => ExecuteMethod(NewTargetSolution);
+
+            _cmdPublish = new CommandButton { Glyph = Theme.GlyphPublish, Text = "Publish all" };
+            _cmdPublish.Click += (s, e) => ExecuteMethod(PublishAllCustomizations);
+
+            _cmdExport = new CommandButton { Glyph = Theme.GlyphDownload, Text = "Export failures", Enabled = false };
+            _cmdExport.Click += BtnExportFailures_Click;
 
             _commandBar.Controls.Add(_cmdCopy);
             _commandBar.Controls.Add(_cmdPreview);
             _commandBar.Controls.Add(_cmdSelectAll);
             _commandBar.Controls.Add(_cmdClear);
+            _commandBar.Controls.Add(_cmdModifiedSince);
             _commandBar.Controls.Add(CreateCommandSeparator());
             _commandBar.Controls.Add(_cmdCollapse);
             _commandBar.Controls.Add(_cmdExpand);
             _commandBar.Controls.Add(CreateCommandSeparator());
             _commandBar.Controls.Add(_cmdRefresh);
-            _commandBar.Controls.Add(_cmdMore);
+            _commandBar.Controls.Add(_cmdNewSolution);
+            _commandBar.Controls.Add(_cmdPublish);
+            _commandBar.Controls.Add(_cmdExport);
 
             var tips = new ToolTip { AutoPopDelay = 15000 };
             tips.SetToolTip(_cmdCopy, "Copy the ticked components into the target solution");
             tips.SetToolTip(_cmdPreview, "Preview the required components that would be added along with your selection");
             tips.SetToolTip(_cmdSelectAll, "Tick everything shown (use the search box first to tick only the matches)");
             tips.SetToolTip(_cmdClear, "Clear every tick");
+            tips.SetToolTip(_cmdCollapse, "Collapse every folder");
+            tips.SetToolTip(_cmdExpand, "Expand every folder");
+            tips.SetToolTip(_cmdModifiedSince, "Tick every shown component modified on or after a date");
+            tips.SetToolTip(_cmdNewSolution, "Create a new unmanaged solution to use as the target");
+            tips.SetToolTip(_cmdPublish, "Publish all customizations in this environment");
+            tips.SetToolTip(_cmdExport, "Save the components that failed to copy to a CSV file");
             return _commandBar;
-        }
-
-        private void BuildMoreMenu()
-        {
-            _moreMenu = new ContextMenuStrip();
-
-            _miPublish = new ToolStripMenuItem("Publish all customizations");
-            _miPublish.Click += (s, e) => ExecuteMethod(PublishAllCustomizations);
-
-            _miNewSolution = new ToolStripMenuItem("New target solution...");
-            _miNewSolution.Click += (s, e) => ExecuteMethod(NewTargetSolution);
-
-            _miSaveSelection = new ToolStripMenuItem("Save selection...");
-            _miSaveSelection.Click += (s, e) => SaveSelection();
-
-            _miLoadSelection = new ToolStripMenuItem("Load selection...");
-            _miLoadSelection.Click += (s, e) => LoadSelection();
-
-            _miModifiedSince = new ToolStripMenuItem("Select modified since...");
-            _miModifiedSince.Click += (s, e) => SelectModifiedSince();
-
-            _miExport = new ToolStripMenuItem("Export failures...") { Enabled = false };
-            _miExport.Click += BtnExportFailures_Click;
-
-            _moreMenu.Items.Add(_miPublish);
-            _moreMenu.Items.Add(_miNewSolution);
-            _moreMenu.Items.Add(new ToolStripSeparator());
-            _moreMenu.Items.Add(_miSaveSelection);
-            _moreMenu.Items.Add(_miLoadSelection);
-            _moreMenu.Items.Add(_miModifiedSince);
-            _moreMenu.Items.Add(new ToolStripSeparator());
-            _moreMenu.Items.Add(_miExport);
         }
 
         private static Control CreateCommandSeparator()
@@ -763,7 +706,6 @@ namespace SolutionComponentCloner.UI
             _lblSourceLookup.Text = source.FriendlyName;
             _lblTargetLookup.Text = target.FriendlyName;
             ShowPickers(false);
-            RememberSolutions(source, target);
 
             if (targetChanged && _grid.TotalCount > 0)
             {
@@ -801,9 +743,7 @@ namespace SolutionComponentCloner.UI
             _cmdCollapse.Enabled = total > 0;
             _cmdExpand.Enabled = total > 0;
 
-            _miSaveSelection.Enabled = selected > 0;
-            _miLoadSelection.Enabled = total > 0;
-            _miModifiedSince.Enabled = total > 0;
+            _cmdModifiedSince.Enabled = total > 0;
 
             UpdateFooter();
         }
@@ -882,11 +822,6 @@ namespace SolutionComponentCloner.UI
                         {
                             ShowNotice(BannerKind.Success, $"Solution {created} was created and selected as the target.");
                         }
-                    }
-                    else if (_applySavedSelection)
-                    {
-                        _applySavedSelection = false;
-                        ApplySavedSolutions();
                     }
                 }
             });
@@ -1109,7 +1044,7 @@ namespace SolutionComponentCloner.UI
             _results.Items.Clear();
             _lastResults = new List<ComponentCopyResult>();
             _resultBanner.HideBanner();
-            _miExport.Enabled = false;
+            _cmdExport.Enabled = false;
             HideResultDetails();
         }
 
@@ -1130,7 +1065,7 @@ namespace SolutionComponentCloner.UI
 
             var succeeded = results.Count(r => r.Outcome == CopyOutcome.Success);
             var failed = results.Count - succeeded;
-            _miExport.Enabled = failed > 0;
+            _cmdExport.Enabled = failed > 0;
 
             if (cancelled)
             {
@@ -1362,68 +1297,6 @@ namespace SolutionComponentCloner.UI
                     LoadSolutionsAsync();
                 }
             });
-        }
-
-        private void SaveSelection()
-        {
-            var selected = _grid.SelectedComponents.ToList();
-            if (selected.Count == 0)
-            {
-                return;
-            }
-
-            var source = _cmbSource.SelectedSolution;
-            using (var dialog = new SaveFileDialog
-            {
-                Filter = "Saved selection (*.json)|*.json",
-                FileName = (source?.UniqueName ?? "components") + "-selection.json"
-            })
-            {
-                if (dialog.ShowDialog(this) != DialogResult.OK)
-                {
-                    return;
-                }
-
-                try
-                {
-                    SelectionFile.Save(dialog.FileName, SelectionFile.FromSelection(selected, source?.FriendlyName));
-                    ShowNotice(BannerKind.Success, $"Saved {selected.Count} selected component(s) to {Path.GetFileName(dialog.FileName)}.");
-                }
-                catch (Exception ex)
-                {
-                    ShowErrorDialog(ex, "Solution Component Cloner", "Unable to save the selection.", false);
-                }
-            }
-        }
-
-        private void LoadSelection()
-        {
-            using (var dialog = new OpenFileDialog { Filter = "Saved selection (*.json)|*.json|All files (*.*)|*.*" })
-            {
-                if (dialog.ShowDialog(this) != DialogResult.OK)
-                {
-                    return;
-                }
-
-                try
-                {
-                    var document = SelectionFile.Load(dialog.FileName);
-                    var (matched, missing) = SelectionFile.Apply(_grid.AllItems.ToList(), document);
-                    _grid.NotifySelectionChanged();
-
-                    var message = $"Selected {matched} of {document.Components.Count} saved component(s).";
-                    if (missing > 0)
-                    {
-                        message += $" {missing} were not found in this solution.";
-                    }
-
-                    ShowNotice(missing > 0 ? BannerKind.Warning : BannerKind.Success, message);
-                }
-                catch (Exception ex)
-                {
-                    ShowErrorDialog(ex, "Solution Component Cloner", "Unable to read the selection file.", false);
-                }
-            }
         }
 
         private void SelectModifiedSince()

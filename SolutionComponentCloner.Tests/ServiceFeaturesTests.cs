@@ -428,62 +428,6 @@ namespace SolutionComponentCloner.Tests
             Assert.Empty(result.Warnings);
         }
 
-        // ---- saved selections --------------------------------------------------------------------------
-
-        [Fact]
-        public void SelectionFileRoundTripsAndAppliesByIdThenByName()
-        {
-            var source = new List<SolutionComponentItem>
-            {
-                Item(60, "Account Main"), Item(26, "Active Accounts"), Item(61, "new_a.js")
-            };
-            var document = SelectionFile.FromSelection(source, "Sales");
-            var path = Path.Combine(Path.GetTempPath(), "scc-selection-" + Guid.NewGuid() + ".json");
-
-            try
-            {
-                SelectionFile.Save(path, document);
-                var loaded = SelectionFile.Load(path);
-
-                // Another environment: same names, different ids for the form; the view keeps its id; the script is absent.
-                var target = new List<SolutionComponentItem>
-                {
-                    Item(60, "Account Main"),
-                    new SolutionComponentItem { ObjectId = source[1].ObjectId, ComponentType = 26, DisplayName = "Renamed view" },
-                    Item(61, "other.js")
-                };
-
-                var (matched, missing) = SelectionFile.Apply(target, loaded);
-
-                Assert.Equal("Sales", loaded.SourceSolution);
-                Assert.Equal(3, loaded.Components.Count);
-                Assert.Equal((2, 1), (matched, missing));
-                Assert.True(target[0].Selected);
-                Assert.True(target[1].Selected);
-                Assert.False(target[2].Selected);
-            }
-            finally
-            {
-                File.Delete(path);
-            }
-        }
-
-        [Fact]
-        public void SelectionFileRejectsAFileThatIsNotASelection()
-        {
-            var path = Path.Combine(Path.GetTempPath(), "scc-bad-" + Guid.NewGuid() + ".json");
-            File.WriteAllText(path, "{}");
-
-            try
-            {
-                Assert.Throws<InvalidDataException>(() => SelectionFile.Load(path));
-            }
-            finally
-            {
-                File.Delete(path);
-            }
-        }
-
         // ---- search and sort ---------------------------------------------------------------------------
 
         [Theory]

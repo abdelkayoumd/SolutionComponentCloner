@@ -26,10 +26,9 @@ solution into another, browsing the source solution the way the Power Apps solut
   everything they are built from) and any such tables, with what will be copied for each.
 - **Clear results** – a banner summarises how many components were copied or failed, with a per-component
   list one click away. Failures can be exported to CSV.
-- **Everything around the copy** – *Publish all customizations* afterwards, *New target solution...* without
-  leaving the tool, and *Save selection / Load selection* to repeat the same copy on another environment.
-- **Remembers your choices** – the last source and target per connection and the *Include required* setting.
-  Solutions are listed newest first, with their creation date.
+- **Everything around the copy** – *Publish all* customizations afterwards, and *New solution* to create the
+  target without leaving the tool. Solutions are listed newest first, with their creation date, and the tool
+  remembers your *Include required* and *Hide components already in target* settings.
 - **Readable names everywhere** – including custom and ISV component types, which are resolved through
   `solutioncomponentdefinition`. Solutions and components with thousands of rows are loaded in full.
 
