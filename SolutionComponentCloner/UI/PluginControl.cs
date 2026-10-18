@@ -53,10 +53,11 @@ namespace SolutionComponentCloner.UI
         private CommandButton _cmdExpand;
         private CommandButton _cmdRefresh;
         private CommandButton _cmdMore;
+        private Control _optionsRow;
         private CheckBox _chkIncludeRequired;
+        private CheckBox _chkHideExisting;
         private TextBox _txtSearch;
         private ContextMenuStrip _moreMenu;
-        private ToolStripMenuItem _miHideExisting;
         private ToolStripMenuItem _miPublish;
         private ToolStripMenuItem _miNewSolution;
         private ToolStripMenuItem _miSaveSelection;
@@ -299,21 +300,6 @@ namespace SolutionComponentCloner.UI
             _cmdMore.Click += (s, e) => _moreMenu.Show(_cmdMore, new Point(0, _cmdMore.Height));
             BuildMoreMenu();
 
-            _chkIncludeRequired = new CheckBox
-            {
-                Text = "Include required",
-                AutoSize = true,
-                Font = Theme.FontRegular,
-                ForeColor = Theme.TextPrimary,
-                Margin = new Padding(10, 11, 6, 0),
-                Checked = _settings.IncludeRequired
-            };
-            _chkIncludeRequired.CheckedChanged += (s, e) =>
-            {
-                _settings.IncludeRequired = _chkIncludeRequired.Checked;
-                SaveSettings();
-            };
-
             _commandBar.Controls.Add(_cmdCopy);
             _commandBar.Controls.Add(_cmdPreview);
             _commandBar.Controls.Add(_cmdSelectAll);
@@ -324,33 +310,18 @@ namespace SolutionComponentCloner.UI
             _commandBar.Controls.Add(CreateCommandSeparator());
             _commandBar.Controls.Add(_cmdRefresh);
             _commandBar.Controls.Add(_cmdMore);
-            _commandBar.Controls.Add(_chkIncludeRequired);
 
             var tips = new ToolTip { AutoPopDelay = 15000 };
             tips.SetToolTip(_cmdCopy, "Copy the ticked components into the target solution");
             tips.SetToolTip(_cmdPreview, "Preview the required components that would be added along with your selection");
             tips.SetToolTip(_cmdSelectAll, "Tick everything shown (use the search box first to tick only the matches)");
             tips.SetToolTip(_cmdClear, "Clear every tick");
-            tips.SetToolTip(_chkIncludeRequired, "Also add every component the selected ones depend on (tables can override this from their right-click menu)");
             return _commandBar;
         }
 
         private void BuildMoreMenu()
         {
             _moreMenu = new ContextMenuStrip();
-
-            _miHideExisting = new ToolStripMenuItem("Hide components already in target")
-            {
-                CheckOnClick = true,
-                Checked = _settings.HideExisting,
-                Enabled = false
-            };
-            _miHideExisting.CheckedChanged += (s, e) =>
-            {
-                _settings.HideExisting = _miHideExisting.Checked;
-                SaveSettings();
-                _grid.HideInTarget = _miHideExisting.Checked;
-            };
 
             _miPublish = new ToolStripMenuItem("Publish all customizations");
             _miPublish.Click += (s, e) => ExecuteMethod(PublishAllCustomizations);
@@ -370,8 +341,6 @@ namespace SolutionComponentCloner.UI
             _miExport = new ToolStripMenuItem("Export failures...") { Enabled = false };
             _miExport.Click += BtnExportFailures_Click;
 
-            _moreMenu.Items.Add(_miHideExisting);
-            _moreMenu.Items.Add(new ToolStripSeparator());
             _moreMenu.Items.Add(_miPublish);
             _moreMenu.Items.Add(_miNewSolution);
             _moreMenu.Items.Add(new ToolStripSeparator());
@@ -404,27 +373,14 @@ namespace SolutionComponentCloner.UI
                 Font = new Font("Segoe UI Semibold", 13.5F, FontStyle.Bold),
                 ForeColor = Theme.TextPrimary,
                 AutoSize = true,
-                Anchor = AnchorStyles.Left,
-                Margin = new Padding(14, 8, 14, 4)
+                Margin = new Padding(14, 10, 14, 6)
             };
-
-            var titleRow = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill,
-                AutoSize = true,
-                ColumnCount = 2,
-                Margin = new Padding(0)
-            };
-            titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-            titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            titleRow.Controls.Add(_lblViewTitle, 0, 0);
-            titleRow.Controls.Add(BuildSearchBox(), 1, 0);
 
             _warnBanner = new Banner();
             _noticeBanner = new Banner();
             _resultBanner = new Banner();
 
-            top.Controls.Add(titleRow);
+            top.Controls.Add(_lblViewTitle);
             top.Controls.Add(BuildLookupRow());
             top.Controls.Add(BuildPickersHost());
             top.Controls.Add(_warnBanner);
@@ -463,14 +419,77 @@ namespace SolutionComponentCloner.UI
                 Height = 28,
                 Padding = new Padding(1),
                 BackColor = Theme.BorderStrong,
-                Anchor = AnchorStyles.Right,
-                Margin = new Padding(0, 6, 14, 2)
+                Margin = new Padding(0, 6, 18, 0)
             };
             var inner = new Panel { Dock = DockStyle.Fill, BackColor = Color.White, Padding = new Padding(8, 5, 0, 0) };
             inner.Controls.Add(_txtSearch);
             inner.Controls.Add(glyph);
             frame.Controls.Add(inner);
             return frame;
+        }
+
+        /// <summary>The search box and the two options that shape what is listed and copied, in one row above the list's header.</summary>
+        private Control BuildOptionsRow()
+        {
+            var row = new FlowLayoutPanel
+            {
+                Dock = DockStyle.Top,
+                AutoSize = true,
+                WrapContents = true,
+                BackColor = Theme.PanelBackground,
+                Padding = new Padding(14, 4, 14, 6)
+            };
+            row.Paint += (s, e) =>
+            {
+                using (var pen = new Pen(Theme.Border))
+                {
+                    e.Graphics.DrawLine(pen, 0, row.Height - 1, row.Width, row.Height - 1);
+                }
+            };
+
+            _chkHideExisting = new CheckBox
+            {
+                Text = "Hide components already in target",
+                AutoSize = true,
+                Font = Theme.FontRegular,
+                ForeColor = Theme.TextPrimary,
+                Margin = new Padding(0, 10, 18, 0),
+                Checked = _settings.HideExisting,
+                Enabled = false
+            };
+            _chkHideExisting.CheckedChanged += (s, e) =>
+            {
+                _settings.HideExisting = _chkHideExisting.Checked;
+                SaveSettings();
+                _grid.HideInTarget = _chkHideExisting.Checked;
+            };
+
+            _chkIncludeRequired = new CheckBox
+            {
+                Text = "Include required",
+                AutoSize = true,
+                Font = Theme.FontRegular,
+                ForeColor = Theme.TextPrimary,
+                Margin = new Padding(0, 10, 0, 0),
+                Checked = _settings.IncludeRequired
+            };
+            _chkIncludeRequired.CheckedChanged += (s, e) =>
+            {
+                _settings.IncludeRequired = _chkIncludeRequired.Checked;
+                SaveSettings();
+            };
+
+            row.Controls.Add(BuildSearchBox());
+            row.Controls.Add(_chkHideExisting);
+            row.Controls.Add(_chkIncludeRequired);
+
+            var tips = new ToolTip { AutoPopDelay = 15000 };
+            tips.SetToolTip(_chkHideExisting, "Hide the components the target solution already contains");
+            tips.SetToolTip(_chkIncludeRequired,
+                "Also add every component the selected ones depend on (a table can override this from its right-click menu)");
+
+            _optionsRow = row;
+            return row;
         }
 
         private Control BuildLookupRow()
@@ -672,6 +691,7 @@ namespace SolutionComponentCloner.UI
                 Panel2Collapsed = true
             };
             _split.Panel1.Controls.Add(_grid);
+            _split.Panel1.Controls.Add(BuildOptionsRow());
             _split.Panel2.Controls.Add(_results);
             return _split;
         }
@@ -761,6 +781,7 @@ namespace SolutionComponentCloner.UI
         {
             _busy = busy;
             _commandBar.Enabled = !busy;
+            _optionsRow.Enabled = !busy;
             _grid.Enabled = !busy;
             _pickersHost.Enabled = !busy;
             _lookupRow.Enabled = !busy;
@@ -923,7 +944,7 @@ namespace SolutionComponentCloner.UI
             _targetKeys = null;
             _onlyInTargetCount = 0;
             _grid.ClearTargetInfo();
-            _miHideExisting.Enabled = false;
+            _chkHideExisting.Enabled = false;
         }
 
         private void RefreshTargetMembership()
@@ -956,8 +977,8 @@ namespace SolutionComponentCloner.UI
                     var sourceKeys = new HashSet<(int, Guid)>(_grid.AllItems.Select(i => (i.ComponentType, i.ObjectId)));
                     _onlyInTargetCount = _targetKeys.Count(k => !sourceKeys.Contains((k.Type, k.Id)));
                     _grid.ApplyTargetKeys(_targetKeys);
-                    _miHideExisting.Enabled = true;
-                    if (_miHideExisting.Checked)
+                    _chkHideExisting.Enabled = true;
+                    if (_chkHideExisting.Checked)
                     {
                         _grid.HideInTarget = true;
                     }
