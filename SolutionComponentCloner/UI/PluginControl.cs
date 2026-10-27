@@ -46,6 +46,7 @@ namespace SolutionComponentCloner.UI
         private CommandButton _cmdPreview;
         private CommandButton _cmdSelectAll;
         private CommandButton _cmdClear;
+        private CommandButton _cmdRemove;
         private CommandButton _cmdCollapse;
         private CommandButton _cmdExpand;
         private CommandButton _cmdRefresh;
@@ -72,6 +73,8 @@ namespace SolutionComponentCloner.UI
         private int _onlyInTargetCount;
         private BackgroundWorker _copyWorker;
         private bool _busy;
+        private bool _swapping;
+        private bool _loadingComponents;
 
         public PluginControl()
         {
@@ -245,10 +248,13 @@ namespace SolutionComponentCloner.UI
             _cmdClear = new CommandButton { Glyph = Theme.GlyphClearSelection, Text = "Clear" };
             _cmdClear.Click += (s, e) => _grid.SetAllSelected(false);
 
-            _cmdCollapse = new CommandButton { Glyph = Theme.GlyphCollapse, Text = "Collapse" };
+            _cmdRemove = new CommandButton { Glyph = Theme.GlyphDelete, Text = "Remove" };
+            _cmdRemove.Click += (s, e) => ExecuteMethod(RemoveSelected);
+
+            _cmdCollapse = new CommandButton { Glyph = Theme.GlyphCollapse };
             _cmdCollapse.Click += (s, e) => _grid.CollapseAll();
 
-            _cmdExpand = new CommandButton { Glyph = Theme.GlyphExpand, Text = "Expand" };
+            _cmdExpand = new CommandButton { Glyph = Theme.GlyphExpand };
             _cmdExpand.Click += (s, e) => _grid.ExpandAll();
 
             _cmdRefresh = new CommandButton { Glyph = Theme.GlyphRefresh, Text = "Refresh" };
@@ -272,6 +278,8 @@ namespace SolutionComponentCloner.UI
             _commandBar.Controls.Add(_cmdClear);
             _commandBar.Controls.Add(_cmdModifiedSince);
             _commandBar.Controls.Add(CreateCommandSeparator());
+            _commandBar.Controls.Add(_cmdRemove);
+            _commandBar.Controls.Add(CreateCommandSeparator());
             _commandBar.Controls.Add(_cmdCollapse);
             _commandBar.Controls.Add(_cmdExpand);
             _commandBar.Controls.Add(CreateCommandSeparator());
@@ -285,8 +293,9 @@ namespace SolutionComponentCloner.UI
             tips.SetToolTip(_cmdPreview, "Preview the required components that would be added along with your selection");
             tips.SetToolTip(_cmdSelectAll, "Tick everything shown (use the search box first to tick only the matches)");
             tips.SetToolTip(_cmdClear, "Clear every tick");
-            tips.SetToolTip(_cmdCollapse, "Collapse every folder");
-            tips.SetToolTip(_cmdExpand, "Expand every folder");
+            tips.SetToolTip(_cmdRemove, "Remove the ticked components from the source solution (they stay in the environment and in other solutions)");
+            tips.SetToolTip(_cmdCollapse, "Collapse all folders");
+            tips.SetToolTip(_cmdExpand, "Expand all folders");
             tips.SetToolTip(_cmdModifiedSince, "Tick every shown component modified on or after a date");
             tips.SetToolTip(_cmdNewSolution, "Create a new unmanaged solution to use as the target");
             tips.SetToolTip(_cmdPublish, "Publish all customizations in this environment");
@@ -443,17 +452,44 @@ namespace SolutionComponentCloner.UI
             {
                 Dock = DockStyle.Fill,
                 AutoSize = true,
-                ColumnCount = 2,
+                ColumnCount = 3,
                 Padding = new Padding(14, 2, 14, 10),
                 Margin = new Padding(0),
                 Visible = false
             };
             _lookupRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
+            _lookupRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             _lookupRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50));
 
-            _lookupRow.Controls.Add(BuildLookup("Source solution", out _lblSourceLookup, new Padding(0, 0, 8, 0)), 0, 0);
-            _lookupRow.Controls.Add(BuildLookup("Target solution", out _lblTargetLookup, new Padding(8, 0, 0, 0)), 1, 0);
+            var swap = CreateSwapButton();
+            swap.Anchor = AnchorStyles.Bottom;
+            swap.Margin = new Padding(8, 0, 8, 0);
+
+            _lookupRow.Controls.Add(BuildLookup("Source solution", out _lblSourceLookup, new Padding(0)), 0, 0);
+            _lookupRow.Controls.Add(swap, 1, 0);
+            _lookupRow.Controls.Add(BuildLookup("Target solution", out _lblTargetLookup, new Padding(0)), 2, 0);
             return _lookupRow;
+        }
+
+        private Button CreateSwapButton()
+        {
+            var button = new Button
+            {
+                Text = Theme.GlyphSwap,
+                Font = Theme.FontIcon,
+                ForeColor = Theme.Accent,
+                BackColor = Theme.PanelBackground,
+                FlatStyle = FlatStyle.Flat,
+                Size = new Size(34, 28),
+                Cursor = Cursors.Hand,
+                UseVisualStyleBackColor = false
+            };
+            button.FlatAppearance.BorderColor = Theme.Border;
+            button.FlatAppearance.MouseOverBackColor = Theme.Hover;
+            button.FlatAppearance.MouseDownBackColor = Theme.Pressed;
+            button.Click += (s, e) => SwapSolutions();
+            new ToolTip().SetToolTip(button, "Swap the source and target solutions");
+            return button;
         }
 
         private Control BuildLookup(string caption, out Label valueLabel, Padding margin)
@@ -540,26 +576,31 @@ namespace SolutionComponentCloner.UI
             var sourceGroup = BuildSolutionPicker("Source solution", out _cmbSource);
             var targetGroup = BuildSolutionPicker("Target solution", out _cmbTarget);
 
-            var arrow = new Label
-            {
-                Text = "→",
-                Font = new Font("Segoe UI", 16F, FontStyle.Bold),
-                ForeColor = Theme.Accent,
-                AutoSize = true,
-                Anchor = AnchorStyles.None,
-                Margin = new Padding(10, 24, 10, 0)
-            };
+            var swap = CreateSwapButton();
+            swap.Anchor = AnchorStyles.None;
+            swap.Margin = new Padding(10, 24, 10, 0);
 
             panel.Controls.Add(sourceGroup, 0, 0);
-            panel.Controls.Add(arrow, 1, 0);
+            panel.Controls.Add(swap, 1, 0);
             panel.Controls.Add(targetGroup, 2, 0);
 
             _cmbSource.SelectionChanged += (s, e) =>
             {
+                if (_swapping)
+                {
+                    return;
+                }
+
                 LoadSourceComponentsAsync();
                 OnSolutionSelectionChanged();
             };
-            _cmbTarget.SelectionChanged += (s, e) => OnSolutionSelectionChanged();
+            _cmbTarget.SelectionChanged += (s, e) =>
+            {
+                if (!_swapping)
+                {
+                    OnSolutionSelectionChanged();
+                }
+            };
 
             var host = new Panel
             {
@@ -709,10 +750,37 @@ namespace SolutionComponentCloner.UI
             _lblTargetLookup.Text = target.FriendlyName;
             ShowPickers(false);
 
-            if (targetChanged && _grid.TotalCount > 0)
+            // A running component load compares with the target itself once it finishes.
+            if (targetChanged && _grid.TotalCount > 0 && !_loadingComponents)
             {
                 RefreshTargetMembership();
             }
+        }
+
+        private void SwapSolutions()
+        {
+            var source = _cmbSource.SelectedSolution;
+            var target = _cmbTarget.SelectedSolution;
+            if (_busy || source == null || target == null || source.SolutionId == target.SolutionId)
+            {
+                return;
+            }
+
+            _swapping = true;
+            try
+            {
+                _cmbSource.SelectBySolutionId(target.SolutionId);
+                _cmbTarget.SelectBySolutionId(source.SolutionId);
+            }
+            finally
+            {
+                _swapping = false;
+            }
+
+            _lastSourceId = null;
+            _lastTargetId = null;
+            LoadSourceComponentsAsync();
+            OnSolutionSelectionChanged();
         }
 
         private void ShowPickers(bool show)
@@ -741,6 +809,8 @@ namespace SolutionComponentCloner.UI
             _cmdCopy.Enabled = selected > 0;
             _cmdPreview.Enabled = selected > 0;
             _cmdClear.Enabled = selected > 0;
+            _cmdRemove.Text = selected > 0 ? $"Remove {selected}" : "Remove";
+            _cmdRemove.Enabled = selected > 0;
             _cmdSelectAll.Enabled = total > 0;
             _cmdCollapse.Enabled = total > 0;
             _cmdExpand.Enabled = total > 0;
@@ -829,7 +899,7 @@ namespace SolutionComponentCloner.UI
             });
         }
 
-        private void LoadSourceComponentsAsync()
+        private void LoadSourceComponentsAsync(bool keepResults = false)
         {
             var source = _cmbSource.SelectedSolution;
             if (source == null || Service == null)
@@ -837,12 +907,17 @@ namespace SolutionComponentCloner.UI
                 return;
             }
 
-            ResetResults();
+            if (!keepResults)
+            {
+                ResetResults();
+            }
+
             _warnBanner.HideBanner();
             _noticeBanner.HideBanner();
             ClearTargetMembership();
             _cmdCopy.Enabled = false;
             _lblFooter.Text = "Loading components...";
+            _loadingComponents = true;
 
             WorkAsync(new WorkAsyncInfo
             {
@@ -854,6 +929,7 @@ namespace SolutionComponentCloner.UI
                 ProgressChanged = e => SetWorkingMessage(e.UserState as string),
                 PostWorkCallBack = args =>
                 {
+                    _loadingComponents = false;
                     if (args.Error != null)
                     {
                         _lblFooter.Text = "Failed to load components.";
@@ -1032,6 +1108,95 @@ namespace SolutionComponentCloner.UI
             _noticeBanner.ShowMessage(BannerKind.Info, $"Copying {done} of {total} to {targetName}...", "Cancel", CancelCopy);
         }
 
+        private void RemoveSelected()
+        {
+            var source = _cmbSource.SelectedSolution;
+            var selected = _grid.SelectedComponents.ToList();
+
+            if (source == null)
+            {
+                MessageBox.Show(this, "Choose a source solution first.", "Solution Component Cloner",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            if (source.IsManaged)
+            {
+                MessageBox.Show(this, "The source solution is managed, so components cannot be removed from it.",
+                    "Solution Component Cloner", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
+            if (selected.Count == 0)
+            {
+                MessageBox.Show(this, "Select at least one component to remove.", "Solution Component Cloner",
+                    MessageBoxButtons.OK, MessageBoxIcon.Information);
+                return;
+            }
+
+            var answer = MessageBox.Show(this,
+                $"Remove {selected.Count} component{(selected.Count == 1 ? string.Empty : "s")} from {source.FriendlyName}?\n\n" +
+                "They are not deleted: they stay in this environment and in any other solution that contains them. " +
+                "Only this solution stops listing them.",
+                "Solution Component Cloner", MessageBoxButtons.YesNo, MessageBoxIcon.Warning, MessageBoxDefaultButton.Button2);
+            if (answer != DialogResult.Yes)
+            {
+                return;
+            }
+
+            StartRemove(selected, source.UniqueName, source.FriendlyName);
+        }
+
+        private void StartRemove(List<SolutionComponentItem> selected, string sourceUniqueName, string sourceFriendlyName)
+        {
+            ResetResults();
+            _noticeBanner.HideBanner();
+            SetBusy(true);
+            ShowRemoveProgress(0, selected.Count, sourceFriendlyName);
+
+            var worker = new BackgroundWorker { WorkerReportsProgress = true, WorkerSupportsCancellation = true };
+            _copyWorker = worker;
+
+            worker.DoWork += (s, e) =>
+            {
+                var results = _dataService.RemoveComponents(Service, selected, sourceUniqueName,
+                    (done, total) => worker.ReportProgress(total == 0 ? 0 : done * 100 / total, new[] { done, total }),
+                    () => worker.CancellationPending, out var cancelled);
+                e.Result = new CopyOutcomeData { Results = results, Cancelled = cancelled };
+            };
+            worker.ProgressChanged += (s, e) =>
+            {
+                var counts = (int[])e.UserState;
+                ShowRemoveProgress(counts[0], counts[1], sourceFriendlyName);
+            };
+            worker.RunWorkerCompleted += (s, e) =>
+            {
+                _copyWorker = null;
+                _noticeBanner.HideBanner();
+                SetBusy(false);
+
+                if (e.Error != null)
+                {
+                    ShowErrorDialog(e.Error, "Solution Component Cloner", "Removing the components failed.", false);
+                    return;
+                }
+
+                var data = (CopyOutcomeData)e.Result;
+                RenderResults(data.Results, selected.Count, data.Cancelled, "removed", string.Empty);
+
+                if (data.Results.Any(r => r.Outcome == CopyOutcome.Success))
+                {
+                    LoadSourceComponentsAsync(keepResults: true);
+                }
+            };
+            worker.RunWorkerAsync();
+        }
+
+        private void ShowRemoveProgress(int done, int total, string sourceName)
+        {
+            _noticeBanner.ShowMessage(BannerKind.Info, $"Removing {done} of {total} from {sourceName}...", "Cancel", CancelCopy);
+        }
+
         private void CancelCopy()
         {
             if (_copyWorker != null && _copyWorker.IsBusy)
@@ -1050,7 +1215,8 @@ namespace SolutionComponentCloner.UI
             HideResultDetails();
         }
 
-        private void RenderResults(List<ComponentCopyResult> results, int requested, bool cancelled)
+        private void RenderResults(List<ComponentCopyResult> results, int requested, bool cancelled,
+            string pastTense = "copied", string successHint = " Publish your customizations to make them live.")
         {
             _results.Items.Clear();
             _lastResults = results;
@@ -1072,18 +1238,18 @@ namespace SolutionComponentCloner.UI
             if (cancelled)
             {
                 _resultBanner.ShowMessage(BannerKind.Warning,
-                    $"Cancelled: {succeeded} copied, {failed} failed, {requested - results.Count} not attempted.", "View details", ToggleResultDetails);
+                    $"Cancelled: {succeeded} {pastTense}, {failed} failed, {requested - results.Count} not attempted.", "View details", ToggleResultDetails);
             }
             else if (failed == 0)
             {
                 _resultBanner.ShowMessage(BannerKind.Success,
-                    $"{succeeded} component{(succeeded == 1 ? string.Empty : "s")} copied successfully. Publish your customizations to make them live.",
+                    $"{succeeded} component{(succeeded == 1 ? string.Empty : "s")} {pastTense} successfully.{successHint}",
                     "View details", ToggleResultDetails);
             }
             else
             {
                 _resultBanner.ShowMessage(BannerKind.Error,
-                    $"{succeeded} copied, {failed} failed.", "View details", ToggleResultDetails);
+                    $"{succeeded} {pastTense}, {failed} failed.", "View details", ToggleResultDetails);
                 ShowResultDetails();
             }
         }

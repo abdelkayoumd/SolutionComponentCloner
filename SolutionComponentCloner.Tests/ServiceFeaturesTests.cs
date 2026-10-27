@@ -157,6 +157,67 @@ namespace SolutionComponentCloner.Tests
             Assert.Equal(3, fake.ExecutedRequests.OfType<AddSolutionComponentRequest>().Count());
         }
 
+        // ---- removing components from the source solution ------------------------------------------------
+
+        [Fact]
+        public void RemovalSendsOneRequestPerComponentWithTablesLast()
+        {
+            var table = Item(ComponentTypeCatalog.Entity, "account");
+            var form = Item(60, "Main form");
+            var view = Item(26, "Active accounts");
+            var fake = new FakeOrganizationService { OnExecute = MultiAware(r => new OrganizationResponse()) };
+
+            var results = _service.RemoveComponents(fake, new[] { table, form, view }, "SalesCustomizations", null, null, out var cancelled);
+
+            Assert.False(cancelled);
+            var sent = fake.ExecutedRequests.OfType<ExecuteMultipleRequest>().Single().Requests.Cast<RemoveSolutionComponentRequest>().ToList();
+            Assert.Equal(3, sent.Count);
+            Assert.All(sent, r => Assert.Equal("SalesCustomizations", r.SolutionUniqueName));
+            Assert.Equal(ComponentTypeCatalog.Entity, sent.Last().ComponentType);
+            Assert.Equal(table.ObjectId, sent.Last().ComponentId);
+            Assert.All(results, r => Assert.Equal(CopyOutcome.Success, r.Outcome));
+            Assert.Equal("Removed from the solution.", results[0].Message);
+        }
+
+        [Fact]
+        public void RemovalReportsWhichComponentsFailed()
+        {
+            var first = Item(60, "one");
+            var second = Item(60, "two");
+            var fake = new FakeOrganizationService
+            {
+                OnExecute = MultiAware(r =>
+                {
+                    if (((RemoveSolutionComponentRequest)r).ComponentId == second.ObjectId)
+                    {
+                        throw new InvalidOperationException("The component is not in this solution.");
+                    }
+
+                    return new OrganizationResponse();
+                })
+            };
+
+            var results = _service.RemoveComponents(fake, new[] { first, second }, "Sales", null, null, out _);
+
+            Assert.Equal(CopyOutcome.Success, results.Single(r => r.Component == first).Outcome);
+            var failed = results.Single(r => r.Component == second);
+            Assert.Equal(CopyOutcome.Failed, failed.Outcome);
+            Assert.Equal("The component is not in this solution.", failed.Message);
+        }
+
+        [Fact]
+        public void RemovalStopsBetweenBatchesWhenCancelled()
+        {
+            var components = Enumerable.Range(0, 45).Select(i => Item(26)).ToList();
+            var fake = new FakeOrganizationService { OnExecute = MultiAware(r => new OrganizationResponse()) };
+            var batches = 0;
+
+            var results = _service.RemoveComponents(fake, components, "Sales", (d, t) => batches++, () => batches >= 1, out var cancelled);
+
+            Assert.True(cancelled);
+            Assert.Equal(20, results.Count);
+        }
+
         // ---- target membership, publish, create ---------------------------------------------------------
 
         [Fact]

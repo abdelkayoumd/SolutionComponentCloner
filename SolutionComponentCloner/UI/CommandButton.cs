@@ -49,8 +49,9 @@ namespace SolutionComponentCloner.UI
 
         private void RecalculateWidth()
         {
-            var glyphWidth = _glyph.Length == 0 ? 0 : TextRenderer.MeasureText(_glyph, Theme.FontIcon, Size.Empty, TextFormatFlags.NoPadding).Width + GlyphGap;
-            var textWidth = TextRenderer.MeasureText(Text ?? string.Empty, TextFont, Size.Empty, TextFormatFlags.NoPadding).Width;
+            var hasText = !string.IsNullOrEmpty(Text);
+            var glyphWidth = _glyph.Length == 0 ? 0 : TextRenderer.MeasureText(_glyph, Theme.FontIcon, Size.Empty, TextFormatFlags.NoPadding).Width + (hasText ? GlyphGap : 0);
+            var textWidth = hasText ? TextRenderer.MeasureText(Text, TextFont, Size.Empty, TextFormatFlags.NoPadding).Width : 0;
             Width = HorizontalPadding * 2 + glyphWidth + textWidth;
         }
 

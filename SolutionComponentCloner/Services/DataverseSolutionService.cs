@@ -626,6 +626,45 @@ namespace SolutionComponentCloner.Services
             return results;
         }
 
+        /// <summary>Puts tables last so the columns, forms and views listed under them are removed first.</summary>
+        public static List<SolutionComponentItem> OrderForRemoval(IEnumerable<SolutionComponentItem> components)
+        {
+            return components.OrderBy(c => c.ComponentType == ComponentTypeCatalog.Entity ? 1 : 0).ToList();
+        }
+
+        /// <summary>
+        /// Removes the components from an unmanaged solution in ExecuteMultiple batches. They stay in the
+        /// environment and in any other solution; only this solution stops containing them.
+        /// </summary>
+        public List<ComponentCopyResult> RemoveComponents(IOrganizationService service, IList<SolutionComponentItem> components, string solutionUniqueName,
+            Action<int, int> progress, Func<bool> isCancelled, out bool cancelled)
+        {
+            var ordered = OrderForRemoval(components);
+            var requests = ordered
+                .Select(c => (OrganizationRequest)new RemoveSolutionComponentRequest
+                {
+                    ComponentId = c.ObjectId,
+                    ComponentType = c.ComponentType,
+                    SolutionUniqueName = solutionUniqueName
+                })
+                .ToList();
+
+            var outcomes = ExecuteInBatches(service, requests, 20, done => progress?.Invoke(done, ordered.Count), isCancelled, out cancelled);
+
+            var results = new List<ComponentCopyResult>();
+            for (var i = 0; i < outcomes.Count; i++)
+            {
+                results.Add(new ComponentCopyResult
+                {
+                    Component = ordered[i],
+                    Outcome = outcomes[i].Error == null ? CopyOutcome.Success : CopyOutcome.Failed,
+                    Message = outcomes[i].Error ?? "Removed from the solution."
+                });
+            }
+
+            return results;
+        }
+
         public void PublishAll(IOrganizationService service)
         {
             service.Execute(new PublishAllXmlRequest());

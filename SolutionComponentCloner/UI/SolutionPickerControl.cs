@@ -118,6 +118,13 @@ namespace SolutionComponentCloner.UI
             _listView.Columns[2].Width = createdWidth;
         }
 
+        /// <summary>Selects the solution with this id, if it is in the list; returns whether it was found.</summary>
+        public bool SelectBySolutionId(Guid solutionId)
+        {
+            var solution = _all.FirstOrDefault(s => s.SolutionId == solutionId);
+            return solution != null && SelectByUniqueName(solution.UniqueName);
+        }
+
         /// <summary>Selects the solution with this unique name, if it is in the list; returns whether it was found.</summary>
         public bool SelectByUniqueName(string uniqueName)
         {

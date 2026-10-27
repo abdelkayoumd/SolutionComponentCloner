@@ -29,6 +29,9 @@ solution into another, browsing the source solution the way the Power Apps solut
 - **Everything around the copy** – *Publish all* customizations afterwards, and *New solution* to create the
   target without leaving the tool. Solutions are listed newest first, with their creation date, and the tool
   remembers your *Include required* and *Hide components already in target* settings.
+- **Swap and remove** – the swap button between the two solutions exchanges source and target in one click.
+  *Remove* takes the ticked components out of an unmanaged source solution after a confirmation; they are not
+  deleted and stay in the environment and in other solutions.
 - **Readable names everywhere** – including custom and ISV component types, which are resolved through
   `solutioncomponentdefinition`. Solutions and components with thousands of rows are loaded in full.
 
