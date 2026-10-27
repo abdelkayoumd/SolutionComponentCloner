@@ -29,7 +29,9 @@ namespace SolutionComponentCloner.Services
                     {
                         Item = item,
                         Kind = "Model-driven app",
-                        Message = "Adds every table, form, view and process it is built from."
+                        Message = includeRequired
+                            ? "Also adds every table, form and process it uses."
+                            : "Adds only the app and its own pieces, no tables."
                     });
                 }
                 else if (item.IsAddedCompletely)

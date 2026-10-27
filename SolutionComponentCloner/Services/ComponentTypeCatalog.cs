@@ -57,11 +57,10 @@ namespace SolutionComponentCloner.Services
             { 92, new ComponentTypeDefinition("SDK Message Processing Step", "sdkmessageprocessingstep", "name") },
             { 93, new ComponentTypeDefinition("SDK Message Processing Step Image", "sdkmessageprocessingstepimage", "name") },
             { 95, new ComponentTypeDefinition("Service Endpoint", "serviceendpoint", "name") },
-            // A whole Model-Driven App. Its AppModuleComponents list every entity/form/view/
-            // process the app is built from — copying this component always brings all of
-            // those along, since they're the app's own definition, not optional dependencies
-            // AddRequiredComponents can skip. (80 is not in Microsoft's published componenttype
-            // list but is what Dataverse stores for an app module.)
+            // A whole Model-Driven App. With AddRequiredComponents on, copying it brings every table,
+            // flow and site map it uses; with it off, only the app and its own pieces (canvas app,
+            // app settings, search settings) come along. (80 is not in Microsoft's published
+            // componenttype list but is what Dataverse stores for an app module.)
             { ModelDrivenApp, new ComponentTypeDefinition("Model-Driven App", "appmodule", "name") },
             { 152, new ComponentTypeDefinition("SLA", "sla", "name") },
             { 161, new ComponentTypeDefinition("Mobile Offline Profile", "mobileofflineprofile", "name") },

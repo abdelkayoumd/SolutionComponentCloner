@@ -416,10 +416,12 @@ namespace SolutionComponentCloner.UI
                 Margin = new Padding(0, 10, 0, 0),
                 Checked = _settings.IncludeRequired
             };
+            _grid.IncludeRequired = _chkIncludeRequired.Checked;
             _chkIncludeRequired.CheckedChanged += (s, e) =>
             {
                 _settings.IncludeRequired = _chkIncludeRequired.Checked;
                 SaveSettings();
+                _grid.IncludeRequired = _chkIncludeRequired.Checked;
             };
 
             row.Controls.Add(BuildSearchBox());

@@ -22,7 +22,8 @@ namespace SolutionComponentCloner.UI
         private const int CheckBoxOffset = 28;
         private const int CheckBoxSize = 14;
         private const int LabelOffset = 50;
-        private const string AppWarning = "Adds every entity, form and process the app is built from";
+        private const string AppWarningWhenRequiredIncluded = "Also adds every table, form and process it is built from";
+        private const string AppNoteWhenRequiredExcluded = "Tables are not added while Include required is off";
 
         private const int ColComponent = 0;
         private const int ColNote = 1;
@@ -40,11 +41,28 @@ namespace SolutionComponentCloner.UI
         private bool _hideInTarget;
         private ComponentSort _sort = new ComponentSort { Column = ComponentSortColumn.Name };
         private int _visibleCount;
+        private bool _includeRequired;
 
         public event EventHandler ComponentSelectionChanged;
         public event EventHandler ViewChanged;
 
         public bool ShowCheckBoxes { get; set; } = true;
+
+        /// <summary>Whether "Include required" is on; it decides what the note on a model-driven app says.</summary>
+        public bool IncludeRequired
+        {
+            get => _includeRequired;
+            set
+            {
+                if (value == _includeRequired)
+                {
+                    return;
+                }
+
+                _includeRequired = value;
+                Invalidate();
+            }
+        }
 
         public IReadOnlyList<SolutionComponentItem> AllItems => _allItems;
         public int TotalCount => _allItems.Count;
@@ -560,7 +578,7 @@ namespace SolutionComponentCloner.UI
                 TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
         }
 
-        private static void PaintNote(Graphics g, Rectangle bounds, ComponentNode node)
+        private void PaintNote(Graphics g, Rectangle bounds, ComponentNode node)
         {
             var item = node.Item;
             if (item == null)
@@ -579,8 +597,16 @@ namespace SolutionComponentCloner.UI
 
             if (!node.HasChildren && item.ComponentType == ComponentTypeCatalog.ModelDrivenApp)
             {
-                notes.Add(AppWarning);
-                color = Theme.Danger;
+                // With Include required on, an app drags in its tables, flows and site map; with it off it comes with only its own pieces.
+                if (_includeRequired)
+                {
+                    notes.Add(AppWarningWhenRequiredIncluded);
+                    color = Theme.Danger;
+                }
+                else
+                {
+                    notes.Add(AppNoteWhenRequiredExcluded);
+                }
             }
 
             if (item.ComponentType == ComponentTypeCatalog.Entity && item.SubcomponentMode != SubcomponentMode.UseGlobalSetting)

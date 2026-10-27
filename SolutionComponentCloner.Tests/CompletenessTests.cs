@@ -118,6 +118,20 @@ namespace SolutionComponentCloner.Tests
             Assert.Equal("Sales Hub", warning.Item.DisplayName);
         }
 
+        [Fact]
+        public void TheAppWarningSaysTablesComeAlongOnlyWhenIncludeRequiredIsOn()
+        {
+            var app = new[] { Item(ComponentTypeCatalog.ModelDrivenApp, "Sales Hub") };
+
+            var on = Assert.Single(CopyWarnings.Build(app, includeRequired: true)).Message;
+            var off = Assert.Single(CopyWarnings.Build(app, includeRequired: false)).Message;
+
+            Assert.Contains("Also adds every table", on);
+            Assert.DoesNotContain("no tables", on);
+            Assert.Contains("no tables", off);
+            Assert.DoesNotContain("Also adds every table", off);
+        }
+
         [Theory]
         [InlineData(SubcomponentMode.UseGlobalSetting, true, true)]
         [InlineData(SubcomponentMode.UseGlobalSetting, false, false)]

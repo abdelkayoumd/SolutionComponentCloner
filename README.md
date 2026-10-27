@@ -22,8 +22,8 @@ solution into another, browsing the source solution the way the Power Apps solut
 - **Safe, visible copying** – only unmanaged solutions are accepted as a target. Copying runs in batches with a
   live "n of m" count and a Cancel button. Tables are copied before their columns, forms and views.
 - **Heads-up on big components** – a table that is in the solution completely, with all its subcomponents, gets
-  a yellow note. Before copying, you are asked to confirm any model-driven apps (which always pull in
-  everything they are built from) and any such tables, with what will be copied for each.
+  a yellow note. Before copying, you are asked to confirm any model-driven apps (which also pull in the tables,
+  flows and site map they use when *Include required* is on) and any such tables, with what will be copied for each.
 - **Clear results** – a banner summarises how many components were copied or failed, with a per-component
   list one click away. Failures can be exported to CSV.
 - **Everything around the copy** – *Publish all* customizations afterwards, and *New solution* to create the

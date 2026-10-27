@@ -24,8 +24,8 @@ namespace SolutionComponentCloner.UI
                 BackColor = Theme.WarningBackground,
                 ForeColor = Theme.Warning,
                 Font = Theme.FontBold,
-                Text = $"Your selection includes {warnings.Count} component(s) that bring much more than themselves into {targetName}. " +
-                       "Check what will happen to each one."
+                Text = $"Your selection includes {warnings.Count} component(s) worth checking before they are copied into {targetName}. " +
+                       "Here is what will happen to each one."
             };
 
             var list = new ListView
