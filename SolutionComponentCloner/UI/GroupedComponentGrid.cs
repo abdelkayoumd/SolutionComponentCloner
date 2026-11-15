@@ -30,6 +30,9 @@ namespace SolutionComponentCloner.UI
         private const int ColModified = 2;
         private const int ColModifiedBy = 3;
         private const int ColState = 4;
+        private const int ColSolutions = 5;
+        private const string WhereUsedLink = "View";
+        private static readonly Font LinkHoverFont = new Font(Theme.FontRegular, FontStyle.Underline);
 
         private List<SolutionComponentItem> _allItems = new List<SolutionComponentItem>();
         private List<ComponentNode> _roots = new List<ComponentNode>();
@@ -45,14 +48,22 @@ namespace SolutionComponentCloner.UI
         private ComponentSort _sort = new ComponentSort { Column = ComponentSortColumn.Name };
         private int _visibleCount;
         private bool _includeRequired;
+        private int _hoverLinkRow = -1;
 
         public event EventHandler ComponentSelectionChanged;
         public event EventHandler ViewChanged;
 
-        /// <summary>Raised when "Which solutions contain this?" is picked from a component's right-click menu.</summary>
+        /// <summary>Raised when a component's "View" link in the Solutions column is clicked.</summary>
         public event Action<SolutionComponentItem> WhereUsedRequested;
 
         public bool ShowCheckBoxes { get; set; } = true;
+
+        /// <summary>Whether to show the Solutions column, whose "View" link lists the solutions that contain a component.</summary>
+        public bool ShowWhereUsed
+        {
+            get => Columns[ColSolutions].Visible;
+            set => Columns[ColSolutions].Visible = value;
+        }
 
         /// <summary>The components that are only in the target cannot be copied, so that view has no checkboxes.</summary>
         private bool CheckBoxesShown => ShowCheckBoxes && _membership != MembershipFilter.OnlyInTarget;
@@ -198,11 +209,45 @@ namespace SolutionComponentCloner.UI
             AddColumn("Modified", width: 128);
             AddColumn("Modified by", width: 140);
             AddColumn("State", width: 84);
+            AddColumn("Solutions", width: 84);
+            Columns[ColSolutions].Visible = false;
 
             CellValueNeeded += (s, e) => e.Value = string.Empty;
             CellPainting += OnCellPainting;
             CellMouseClick += OnCellMouseClick;
+            CellMouseMove += (s, e) => SetHoverLinkRow(e.ColumnIndex == ColSolutions && IsLinkRow(e.RowIndex) ? e.RowIndex : -1);
+            CellMouseLeave += (s, e) => SetHoverLinkRow(-1);
+            CellToolTipTextNeeded += (s, e) =>
+            {
+                if (e.ColumnIndex == ColSolutions && (e.RowIndex == -1 || IsLinkRow(e.RowIndex)))
+                {
+                    e.ToolTipText = "List the solutions that contain this component";
+                }
+            };
             ColumnHeaderMouseClick += OnHeaderMouseClick;
+        }
+
+        private bool IsLinkRow(int rowIndex) => rowIndex >= 0 && rowIndex < _rows.Count && _rows[rowIndex].Item != null;
+
+        private void SetHoverLinkRow(int rowIndex)
+        {
+            if (rowIndex == _hoverLinkRow)
+            {
+                return;
+            }
+
+            var previous = _hoverLinkRow;
+            _hoverLinkRow = rowIndex;
+            Cursor = rowIndex >= 0 ? Cursors.Hand : Cursors.Default;
+            if (previous >= 0 && previous < RowCount)
+            {
+                InvalidateCell(ColSolutions, previous);
+            }
+
+            if (rowIndex >= 0)
+            {
+                InvalidateCell(ColSolutions, rowIndex);
+            }
         }
 
         private void AddColumn(string header, float fillWeight = 0, int width = 0)
@@ -491,10 +536,9 @@ namespace SolutionComponentCloner.UI
 
             if (e.Button == MouseButtons.Right)
             {
-                if (node.Item != null)
+                if (node.IsTable && node.Item != null && CheckBoxesShown)
                 {
-                    CurrentCell = this[0, e.RowIndex];
-                    ShowComponentMenu(node, e);
+                    ShowSubcomponentMenu(node, e);
                 }
 
                 return;
@@ -502,6 +546,16 @@ namespace SolutionComponentCloner.UI
 
             if (e.Button != MouseButtons.Left)
             {
+                return;
+            }
+
+            if (e.ColumnIndex == ColSolutions)
+            {
+                if (node.Item != null)
+                {
+                    WhereUsedRequested?.Invoke(node.Item);
+                }
+
                 return;
             }
 
@@ -517,20 +571,12 @@ namespace SolutionComponentCloner.UI
             }
         }
 
-        private void ShowComponentMenu(ComponentNode node, DataGridViewCellMouseEventArgs e)
+        private void ShowSubcomponentMenu(ComponentNode node, DataGridViewCellMouseEventArgs e)
         {
             var menu = new ContextMenuStrip();
-            var whereUsed = new ToolStripMenuItem("Which solutions contain this?");
-            whereUsed.Click += (s, args) => WhereUsedRequested?.Invoke(node.Item);
-            menu.Items.Add(whereUsed);
-
-            if (node.IsTable && CheckBoxesShown)
-            {
-                menu.Items.Add(new ToolStripSeparator());
-                AddModeItem(menu, node, "Follow the \"Include required components\" checkbox", SubcomponentMode.UseGlobalSetting);
-                AddModeItem(menu, node, "Include all of the table's subcomponents", SubcomponentMode.IncludeAll);
-                AddModeItem(menu, node, "Only the subcomponents I ticked", SubcomponentMode.OnlySelected);
-            }
+            AddModeItem(menu, node, "Follow the \"Include required components\" checkbox", SubcomponentMode.UseGlobalSetting);
+            AddModeItem(menu, node, "Include all of the table's subcomponents", SubcomponentMode.IncludeAll);
+            AddModeItem(menu, node, "Only the subcomponents I ticked", SubcomponentMode.OnlySelected);
 
             var cell = GetCellDisplayRectangle(e.ColumnIndex, e.RowIndex, false);
             menu.Show(this, new Point(cell.Left + e.X, cell.Top + e.Y));
@@ -652,6 +698,14 @@ namespace SolutionComponentCloner.UI
                     break;
                 case ColState:
                     PaintText(g, bounds, node.Item?.IsManaged == true ? "Managed" : node.Item?.IsManaged == false ? "Unmanaged" : null);
+                    break;
+                case ColSolutions:
+                    if (node.Item != null)
+                    {
+                        TextRenderer.DrawText(g, WhereUsedLink, e.RowIndex == _hoverLinkRow ? LinkHoverFont : Theme.FontRegular,
+                            new Rectangle(bounds.Left + 6, bounds.Top, Math.Max(0, bounds.Width - 6), bounds.Height), Theme.Accent,
+                            TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.NoPadding);
+                    }
                     break;
             }
 

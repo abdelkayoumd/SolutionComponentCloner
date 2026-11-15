@@ -651,7 +651,7 @@ namespace SolutionComponentCloner.UI
 
         private Control BuildSplit()
         {
-            _grid = new GroupedComponentGrid { Dock = DockStyle.Fill };
+            _grid = new GroupedComponentGrid { Dock = DockStyle.Fill, ShowWhereUsed = true };
             _grid.ComponentSelectionChanged += (s, e) => UpdateSelectionUi();
             _grid.ViewChanged += (s, e) => UpdateFooter();
             _grid.WhereUsedRequested += ShowSolutionsContaining;

@@ -37,7 +37,8 @@ solution into another, browsing the source solution the way the Power Apps solut
   and stay in the environment and in other solutions, and *Add back* undoes it.
 - **Check the target** – *Check target* lists the components the target solution depends on but does not
   contain, and adds the ones you tick, so the solution imports cleanly elsewhere.
-- **Which solutions contain this?** – right-click any component to list every solution that contains it.
+- **Which solutions contain this?** – the *View* link in the Solutions column lists every solution that
+  contains a component.
 - **Readable names everywhere** – including custom and ISV component types, which are resolved through
   `solutioncomponentdefinition`. Solutions and components with thousands of rows are loaded in full.
 
