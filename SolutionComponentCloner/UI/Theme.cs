@@ -54,7 +54,9 @@ namespace SolutionComponentCloner.UI
         public const string GlyphChevronUp = "";
         public const string GlyphSwap = "";
         public const string GlyphDelete = "";
-        public const string GlyphAdd = "";
+        public const string GlyphMove = "";
+        public const string GlyphCheckList = "";
+        public const string GlyphAdd ="";
         public const string GlyphCalendar = "";
         public const string GlyphPreview = "";
         public const string GlyphPublish = "";

@@ -28,17 +28,89 @@ namespace SolutionComponentCloner.Services
             };
             query.Criteria.AddCondition("isvisible", ConditionOperator.Equal, true);
 
-            return RetrieveAll(service, query)
-                .Select(e => new SolutionListItem
+            return RetrieveAll(service, query).Select(ToSolutionListItem).ToList();
+        }
+
+        private static SolutionListItem ToSolutionListItem(Entity e)
+        {
+            return new SolutionListItem
+            {
+                SolutionId = e.Id,
+                UniqueName = e.GetAttributeValue<string>("uniquename"),
+                FriendlyName = e.GetAttributeValue<string>("friendlyname"),
+                CreatedOn = e.GetAttributeValue<DateTime?>("createdon"),
+                IsManaged = e.GetAttributeValue<bool>("ismanaged"),
+                Version = e.GetAttributeValue<string>("version")
+            };
+        }
+
+        /// <summary>
+        /// The visible solutions that list this component. A table added with all its subcomponents holds its
+        /// columns, forms and views without listing them, so such a solution is not returned for a subcomponent.
+        /// </summary>
+        public List<SolutionListItem> GetSolutionsContaining(IOrganizationService service, SolutionComponentItem component)
+        {
+            var query = new QueryExpression("solution")
+            {
+                ColumnSet = new ColumnSet("solutionid", "uniquename", "friendlyname", "ismanaged", "version", "createdon"),
+                Criteria = new FilterExpression(),
+                Distinct = true,
+                Orders = { new OrderExpression("friendlyname", OrderType.Ascending) }
+            };
+            query.Criteria.AddCondition("isvisible", ConditionOperator.Equal, true);
+
+            var link = query.AddLink("solutioncomponent", "solutionid", "solutionid");
+            link.LinkCriteria.AddCondition("objectid", ConditionOperator.Equal, component.ObjectId);
+            link.LinkCriteria.AddCondition("componenttype", ConditionOperator.Equal, component.ComponentType);
+
+            return RetrieveAll(service, query).Select(ToSolutionListItem).ToList();
+        }
+
+        /// <summary>The full name of the connected user, as it appears in "Modified by"; null when it cannot be read.</summary>
+        public string GetCurrentUserName(IOrganizationService service)
+        {
+            var userId = ((WhoAmIResponse)service.Execute(new WhoAmIRequest())).UserId;
+            var query = new QueryExpression("systemuser")
+            {
+                ColumnSet = new ColumnSet("fullname"),
+                Criteria = new FilterExpression()
+            };
+            query.Criteria.AddCondition("systemuserid", ConditionOperator.Equal, userId);
+
+            return service.RetrieveMultiple(query).Entities.FirstOrDefault()?.GetAttributeValue<string>("fullname");
+        }
+
+        /// <summary>Resolves names, tables and folders for components known only by type and id.</summary>
+        public SolutionComponentLoadResult GetComponents(IOrganizationService service, IEnumerable<(int Type, Guid Id)> keys, Action<string> progress = null)
+        {
+            var result = new SolutionComponentLoadResult();
+            var rows = keys.Select(k => new SolutionComponentItem { ComponentType = k.Type, ObjectId = k.Id }).ToList();
+            result.Items = ResolveItems(service, rows, result.Warnings, progress);
+            return result;
+        }
+
+        /// <summary>The components a solution depends on but does not contain, which is what blocks a clean import elsewhere.</summary>
+        public SolutionComponentLoadResult GetMissingDependencies(IOrganizationService service, string solutionUniqueName, Action<string> progress = null)
+        {
+            var result = new SolutionComponentLoadResult();
+            progress?.Invoke("Checking the solution's dependencies...");
+
+            var response = service.Execute(new RetrieveMissingDependenciesRequest { SolutionUniqueName = solutionUniqueName });
+            var collection = response.Results.Contains("EntityCollection") ? response.Results["EntityCollection"] as EntityCollection : null;
+
+            var found = new Dictionary<(int, Guid), SolutionComponentItem>();
+            foreach (var dependency in collection?.Entities ?? Enumerable.Empty<Entity>())
+            {
+                var id = dependency.GetAttributeValue<Guid>("requiredcomponentobjectid");
+                var type = dependency.GetAttributeValue<OptionSetValue>("requiredcomponenttype")?.Value ?? 0;
+                if (id != Guid.Empty && !found.ContainsKey((type, id)))
                 {
-                    SolutionId = e.Id,
-                    UniqueName = e.GetAttributeValue<string>("uniquename"),
-                    FriendlyName = e.GetAttributeValue<string>("friendlyname"),
-                    CreatedOn = e.GetAttributeValue<DateTime?>("createdon"),
-                    IsManaged = e.GetAttributeValue<bool>("ismanaged"),
-                    Version = e.GetAttributeValue<string>("version")
-                })
-                .ToList();
+                    found[(type, id)] = new SolutionComponentItem { ObjectId = id, ComponentType = type };
+                }
+            }
+
+            result.Items = ResolveItems(service, found.Values.ToList(), result.Warnings, progress);
+            return result;
         }
 
         public SolutionComponentLoadResult GetSolutionComponents(IOrganizationService service, Guid solutionId, Action<string> progress = null)
@@ -611,7 +683,13 @@ namespace SolutionComponentCloner.Services
                 .ToList();
 
             var outcomes = ExecuteInBatches(service, requests, 20, done => progress?.Invoke(done, components.Count), isCancelled, out cancelled);
+            return ToResults(components, outcomes, addRequiredComponents ? "Added with required components." : "Added.");
+        }
 
+        /// <summary>One result per attempted request, in the order the components were sent.</summary>
+        private static List<ComponentCopyResult> ToResults(IList<SolutionComponentItem> components,
+            List<(OrganizationResponse Response, string Error)> outcomes, string successMessage)
+        {
             var results = new List<ComponentCopyResult>();
             for (var i = 0; i < outcomes.Count; i++)
             {
@@ -619,11 +697,85 @@ namespace SolutionComponentCloner.Services
                 {
                     Component = components[i],
                     Outcome = outcomes[i].Error == null ? CopyOutcome.Success : CopyOutcome.Failed,
-                    Message = outcomes[i].Error ?? (addRequiredComponents ? "Added with required components." : "Added.")
+                    Message = outcomes[i].Error ?? successMessage
                 });
             }
 
             return results;
+        }
+
+        /// <summary>
+        /// Copies the components to the target, then removes from the source the ones that were copied. A component
+        /// that fails to copy stays in the source; cancelling during the copy leaves everything in the source.
+        /// </summary>
+        public List<ComponentCopyResult> MoveComponents(IOrganizationService service, IList<SolutionComponentItem> components, string sourceSolutionUniqueName,
+            string targetSolutionUniqueName, bool addRequiredComponents, Action<int, int> progress, Func<bool> isCancelled, out bool cancelled)
+        {
+            var total = components.Count * 2;
+            var copied = CopyComponents(service, components, targetSolutionUniqueName, addRequiredComponents,
+                (done, count) => progress?.Invoke(done, total), isCancelled, out cancelled);
+
+            var removed = new Dictionary<SolutionComponentItem, ComponentCopyResult>();
+            var toRemove = copied.Where(r => r.Outcome == CopyOutcome.Success).Select(r => r.Component).ToList();
+            if (!cancelled && toRemove.Count > 0)
+            {
+                removed = RemoveComponents(service, toRemove, sourceSolutionUniqueName,
+                        (done, count) => progress?.Invoke(components.Count + done, total), isCancelled, out cancelled)
+                    .ToDictionary(r => r.Component);
+            }
+
+            return copied.Select(copy =>
+            {
+                if (copy.Outcome != CopyOutcome.Success)
+                {
+                    return Result(copy.Component, CopyOutcome.Failed, "Not copied, so it was left in the source: " + copy.Message);
+                }
+
+                if (!removed.TryGetValue(copy.Component, out var removal))
+                {
+                    return Result(copy.Component, CopyOutcome.Failed, "Copied to the target, but still in the source because the move was cancelled.");
+                }
+
+                return removal.Outcome == CopyOutcome.Success
+                    ? Result(copy.Component, CopyOutcome.Success, "Moved.")
+                    : Result(copy.Component, CopyOutcome.Failed, "Copied to the target, but not removed from the source: " + removal.Message);
+            }).ToList();
+        }
+
+        private static ComponentCopyResult Result(SolutionComponentItem component, CopyOutcome outcome, string message)
+        {
+            return new ComponentCopyResult { Component = component, Outcome = outcome, Message = message };
+        }
+
+        /// <summary>
+        /// Puts components back into a solution they were removed from: tables first, and a table that was in the
+        /// solution with all its subcomponents goes back the same way.
+        /// </summary>
+        public List<ComponentCopyResult> RestoreComponents(IOrganizationService service, IList<SolutionComponentItem> components, string solutionUniqueName,
+            Action<int, int> progress, Func<bool> isCancelled, out bool cancelled)
+        {
+            var ordered = components.OrderBy(c => c.ComponentType == ComponentTypeCatalog.Entity ? 0 : 1).ToList();
+            var requests = ordered
+                .Select(c =>
+                {
+                    var request = new AddSolutionComponentRequest
+                    {
+                        ComponentId = c.ObjectId,
+                        ComponentType = c.ComponentType,
+                        SolutionUniqueName = solutionUniqueName,
+                        AddRequiredComponents = false
+                    };
+                    if (c.ComponentType == ComponentTypeCatalog.Entity)
+                    {
+                        request.DoNotIncludeSubcomponents = !c.IsAddedCompletely;
+                    }
+
+                    return (OrganizationRequest)request;
+                })
+                .ToList();
+
+            var outcomes = ExecuteInBatches(service, requests, 20, done => progress?.Invoke(done, ordered.Count), isCancelled, out cancelled);
+            return ToResults(ordered, outcomes, "Added back to the solution.");
         }
 
         /// <summary>Puts tables last so the columns, forms and views listed under them are removed first.</summary>
@@ -650,19 +802,7 @@ namespace SolutionComponentCloner.Services
                 .ToList();
 
             var outcomes = ExecuteInBatches(service, requests, 20, done => progress?.Invoke(done, ordered.Count), isCancelled, out cancelled);
-
-            var results = new List<ComponentCopyResult>();
-            for (var i = 0; i < outcomes.Count; i++)
-            {
-                results.Add(new ComponentCopyResult
-                {
-                    Component = ordered[i],
-                    Outcome = outcomes[i].Error == null ? CopyOutcome.Success : CopyOutcome.Failed,
-                    Message = outcomes[i].Error ?? "Removed from the solution."
-                });
-            }
-
-            return results;
+            return ToResults(ordered, outcomes, "Removed from the solution.");
         }
 
         public void PublishAll(IOrganizationService service)

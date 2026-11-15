@@ -13,7 +13,9 @@ namespace SolutionComponentCloner.UI
         private readonly Label _message;
         private readonly Label _link;
         private readonly ToolTip _toolTip = new ToolTip { AutoPopDelay = 20000 };
+        private readonly Label _secondLink;
         private Action _onLink;
+        private Action _onSecondLink;
 
         public Banner()
         {
@@ -41,6 +43,18 @@ namespace SolutionComponentCloner.UI
                 Cursor = Cursors.Hand
             };
             _link.Click += (s, e) => _onLink?.Invoke();
+            _secondLink = new Label
+            {
+                AutoSize = false,
+                Dock = DockStyle.Right,
+                Width = 110,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Font = new Font(Theme.FontRegular, FontStyle.Underline),
+                ForeColor = Theme.Accent,
+                Cursor = Cursors.Hand,
+                Visible = false
+            };
+            _secondLink.Click += (s, e) => _onSecondLink?.Invoke();
             _message = new Label
             {
                 AutoSize = false,
@@ -52,11 +66,23 @@ namespace SolutionComponentCloner.UI
 
             Controls.Add(_message);
             Controls.Add(_icon);
+            Controls.Add(_secondLink);
             Controls.Add(_link);
+        }
+
+        /// <summary>Shows a second link to the left of the main one; it is cleared by the next <see cref="ShowMessage"/>.</summary>
+        public void SetSecondLink(string text, Action onClick)
+        {
+            _secondLink.Text = text ?? string.Empty;
+            _secondLink.Width = TextRenderer.MeasureText(_secondLink.Text, _secondLink.Font).Width + 24;
+            _secondLink.BackColor = BackColor;
+            _secondLink.Visible = !string.IsNullOrEmpty(text);
+            _onSecondLink = onClick;
         }
 
         public void ShowMessage(BannerKind kind, string message, string linkText = null, Action onLink = null, string toolTip = null)
         {
+            SetSecondLink(null, null);
             Color background, foreground;
             string glyph;
             switch (kind)

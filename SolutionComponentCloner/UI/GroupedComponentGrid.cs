@@ -38,7 +38,10 @@ namespace SolutionComponentCloner.UI
         private readonly HashSet<string> _expandedKeys = new HashSet<string>();
         private bool _defaultCollapsed;
         private string _searchText = string.Empty;
-        private bool _hideInTarget;
+        private List<SolutionComponentItem> _targetOnlyItems = new List<SolutionComponentItem>();
+        private MembershipFilter _membership;
+        private DateTime? _modifiedSince;
+        private string _modifiedBy;
         private ComponentSort _sort = new ComponentSort { Column = ComponentSortColumn.Name };
         private int _visibleCount;
         private bool _includeRequired;
@@ -46,7 +49,13 @@ namespace SolutionComponentCloner.UI
         public event EventHandler ComponentSelectionChanged;
         public event EventHandler ViewChanged;
 
+        /// <summary>Raised when "Which solutions contain this?" is picked from a component's right-click menu.</summary>
+        public event Action<SolutionComponentItem> WhereUsedRequested;
+
         public bool ShowCheckBoxes { get; set; } = true;
+
+        /// <summary>The components that are only in the target cannot be copied, so that view has no checkboxes.</summary>
+        private bool CheckBoxesShown => ShowCheckBoxes && _membership != MembershipFilter.OnlyInTarget;
 
         /// <summary>Whether "Include required" is on; it decides what the note on a model-driven app says.</summary>
         public bool IncludeRequired
@@ -70,7 +79,8 @@ namespace SolutionComponentCloner.UI
         public int GroupCount => _roots.Count;
         public int SelectedCount => _allItems.Count(i => i.Selected);
         public int InTargetCount => _allItems.Count(i => i.InTarget);
-        public bool IsFiltered => !string.IsNullOrWhiteSpace(_searchText) || _hideInTarget;
+        public bool IsFiltered => !string.IsNullOrWhiteSpace(_searchText) || _membership != MembershipFilter.All ||
+                                  _modifiedSince.HasValue || !string.IsNullOrEmpty(_modifiedBy);
         public IEnumerable<SolutionComponentItem> SelectedComponents => _allItems.Where(i => i.Selected);
 
         public string SearchText
@@ -89,20 +99,74 @@ namespace SolutionComponentCloner.UI
             }
         }
 
-        public bool HideInTarget
+        /// <summary>Lists everything in the source, only what the target lacks, only what both have, or what only the target has.</summary>
+        public MembershipFilter Membership
         {
-            get => _hideInTarget;
+            get => _membership;
             set
             {
-                if (value == _hideInTarget)
+                if (value == _membership)
                 {
                     return;
                 }
 
-                _hideInTarget = value;
+                _membership = value;
+                ApplyView();
+                RaiseSelectionChanged();
+            }
+        }
+
+        /// <summary>When set, lists only the components modified on or after this moment.</summary>
+        public DateTime? ModifiedSinceFilter
+        {
+            get => _modifiedSince;
+            set
+            {
+                if (value == _modifiedSince)
+                {
+                    return;
+                }
+
+                _modifiedSince = value;
                 ApplyView();
             }
         }
+
+        /// <summary>When set, lists only the components last modified by this person.</summary>
+        public string ModifiedByFilter
+        {
+            get => _modifiedBy;
+            set
+            {
+                if (value == _modifiedBy)
+                {
+                    return;
+                }
+
+                _modifiedBy = value;
+                ApplyView();
+            }
+        }
+
+        /// <summary>The distinct "Modified by" names of the source components, sorted.</summary>
+        public List<string> ModifiedByNames => _allItems
+            .Select(i => i.ModifiedBy)
+            .Where(n => !string.IsNullOrEmpty(n))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        /// <summary>The components that are in the target but not in the source, shown by the "Only in target" view.</summary>
+        public void SetTargetOnlyItems(IEnumerable<SolutionComponentItem> items)
+        {
+            _targetOnlyItems = items?.ToList() ?? new List<SolutionComponentItem>();
+            if (_membership == MembershipFilter.OnlyInTarget)
+            {
+                ApplyView();
+            }
+        }
+
+        public IReadOnlyList<SolutionComponentItem> TargetOnlyItems => _targetOnlyItems;
 
         public GroupedComponentGrid()
         {
@@ -195,8 +259,9 @@ namespace SolutionComponentCloner.UI
 
         private void ApplyView()
         {
-            var visible = _allItems
-                .Where(i => ComponentFilter.Matches(i, _searchText) && !(_hideInTarget && i.InTarget))
+            var listed = _membership == MembershipFilter.OnlyInTarget ? _targetOnlyItems : _allItems;
+            var visible = listed
+                .Where(i => ComponentFilter.Matches(i, _searchText) && ComponentFilter.MatchesView(i, _membership, _modifiedSince, _modifiedBy))
                 .ToList();
             _visibleCount = visible.Count;
             _roots = ComponentTreeBuilder.Build(visible, _sort);
@@ -227,6 +292,11 @@ namespace SolutionComponentCloner.UI
 
         public void SelectVisible()
         {
+            if (!CheckBoxesShown)
+            {
+                return;
+            }
+
             foreach (var item in VisibleItems)
             {
                 item.Selected = true;
@@ -253,6 +323,11 @@ namespace SolutionComponentCloner.UI
 
         private void ToggleVisibleSelection()
         {
+            if (!CheckBoxesShown)
+            {
+                return;
+            }
+
             var visible = VisibleItems.ToList();
             var selectAll = visible.Any(i => !i.Selected);
             foreach (var item in visible)
@@ -263,11 +338,19 @@ namespace SolutionComponentCloner.UI
             NotifySelectionChanged();
         }
 
-        /// <summary>Ticks every shown component modified on or after the date; returns how many.</summary>
-        public int SelectModifiedSince(DateTime since)
+        /// <summary>
+        /// Ticks every shown component modified on or after the date, optionally only those last modified by
+        /// one person; returns how many.
+        /// </summary>
+        public int SelectModifiedSince(DateTime since, string modifiedBy = null)
         {
+            if (!CheckBoxesShown)
+            {
+                return 0;
+            }
+
             var count = 0;
-            foreach (var item in VisibleItems.Where(i => i.ModifiedOn.HasValue && i.ModifiedOn.Value >= since))
+            foreach (var item in VisibleItems.Where(i => ComponentFilter.MatchesView(i, MembershipFilter.All, since, modifiedBy)))
             {
                 item.Selected = true;
                 count++;
@@ -345,7 +428,7 @@ namespace SolutionComponentCloner.UI
 
         private void ToggleSelection(ComponentNode node)
         {
-            if (!ShowCheckBoxes)
+            if (!CheckBoxesShown)
             {
                 return;
             }
@@ -376,7 +459,7 @@ namespace SolutionComponentCloner.UI
             switch (e.ColumnIndex)
             {
                 case ColComponent:
-                    if (ShowCheckBoxes && e.X >= CheckBoxOffset - 4 && e.X <= CheckBoxOffset + CheckBoxSize + 4)
+                    if (CheckBoxesShown && e.X >= CheckBoxOffset - 4 && e.X <= CheckBoxOffset + CheckBoxSize + 4)
                     {
                         ToggleVisibleSelection();
                     }
@@ -408,9 +491,10 @@ namespace SolutionComponentCloner.UI
 
             if (e.Button == MouseButtons.Right)
             {
-                if (node.IsTable && node.Item != null && ShowCheckBoxes)
+                if (node.Item != null)
                 {
-                    ShowSubcomponentMenu(node, e);
+                    CurrentCell = this[0, e.RowIndex];
+                    ShowComponentMenu(node, e);
                 }
 
                 return;
@@ -421,7 +505,7 @@ namespace SolutionComponentCloner.UI
                 return;
             }
 
-            var onCheckBox = e.ColumnIndex == ColComponent && e.X >= CheckBoxX(node) - 4 && e.X <= CheckBoxX(node) + CheckBoxSize + 4;
+            var onCheckBox = CheckBoxesShown && e.ColumnIndex == ColComponent && e.X >= CheckBoxX(node) - 4 && e.X <= CheckBoxX(node) + CheckBoxSize + 4;
 
             if (onCheckBox)
             {
@@ -433,12 +517,20 @@ namespace SolutionComponentCloner.UI
             }
         }
 
-        private void ShowSubcomponentMenu(ComponentNode node, DataGridViewCellMouseEventArgs e)
+        private void ShowComponentMenu(ComponentNode node, DataGridViewCellMouseEventArgs e)
         {
             var menu = new ContextMenuStrip();
-            AddModeItem(menu, node, "Follow the \"Include required components\" checkbox", SubcomponentMode.UseGlobalSetting);
-            AddModeItem(menu, node, "Include all of the table's subcomponents", SubcomponentMode.IncludeAll);
-            AddModeItem(menu, node, "Only the subcomponents I ticked", SubcomponentMode.OnlySelected);
+            var whereUsed = new ToolStripMenuItem("Which solutions contain this?");
+            whereUsed.Click += (s, args) => WhereUsedRequested?.Invoke(node.Item);
+            menu.Items.Add(whereUsed);
+
+            if (node.IsTable && CheckBoxesShown)
+            {
+                menu.Items.Add(new ToolStripSeparator());
+                AddModeItem(menu, node, "Follow the \"Include required components\" checkbox", SubcomponentMode.UseGlobalSetting);
+                AddModeItem(menu, node, "Include all of the table's subcomponents", SubcomponentMode.IncludeAll);
+                AddModeItem(menu, node, "Only the subcomponents I ticked", SubcomponentMode.OnlySelected);
+            }
 
             var cell = GetCellDisplayRectangle(e.ColumnIndex, e.RowIndex, false);
             menu.Show(this, new Point(cell.Left + e.X, cell.Top + e.Y));
@@ -461,7 +553,7 @@ namespace SolutionComponentCloner.UI
             {
                 var node = _rows[CurrentCell.RowIndex];
 
-                if (e.KeyCode == Keys.Space && ShowCheckBoxes)
+                if (e.KeyCode == Keys.Space && CheckBoxesShown)
                 {
                     ToggleSelection(node);
                     return true;
@@ -525,7 +617,7 @@ namespace SolutionComponentCloner.UI
             {
                 background = rowSelected ? Theme.Pressed : Theme.GroupBackground;
             }
-            else if (state == CheckState.Checked && ShowCheckBoxes)
+            else if (state == CheckState.Checked && CheckBoxesShown)
             {
                 background = rowSelected ? Theme.AccentSelected : Theme.AccentSoft;
             }
@@ -669,7 +761,7 @@ namespace SolutionComponentCloner.UI
                     TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
             }
 
-            if (ShowCheckBoxes)
+            if (CheckBoxesShown)
             {
                 var checkRect = new Rectangle(bounds.Left + CheckBoxX(node), bounds.Top + (bounds.Height - CheckBoxSize) / 2, CheckBoxSize, CheckBoxSize);
                 DrawCheckBox(g, checkRect, state);
@@ -691,7 +783,7 @@ namespace SolutionComponentCloner.UI
 
             var selected = node.SelectedCount;
             var count = node.IsTable ? string.Empty : $"  ({node.DisplayCount})";
-            if (selected > 0 && ShowCheckBoxes)
+            if (selected > 0 && CheckBoxesShown)
             {
                 count += (count.Length == 0 ? "  " : string.Empty) + $" · {selected} selected";
             }
@@ -716,7 +808,7 @@ namespace SolutionComponentCloner.UI
             var textLeft = bounds.Left + 6;
             if (e.ColumnIndex == ColComponent)
             {
-                if (ShowCheckBoxes)
+                if (CheckBoxesShown)
                 {
                     var visible = VisibleItems.ToList();
                     var selected = visible.Count(i => i.Selected);

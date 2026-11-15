@@ -218,6 +218,232 @@ namespace SolutionComponentCloner.Tests
             Assert.Equal(20, results.Count);
         }
 
+        // ---- move: copy, then remove what was copied -----------------------------------------------------
+
+        [Fact]
+        public void MoveCopiesToTheTargetThenRemovesFromTheSource()
+        {
+            var table = Item(ComponentTypeCatalog.Entity, "account");
+            var form = Item(60, "Main form");
+            var fake = new FakeOrganizationService { OnExecute = MultiAware(r => new OrganizationResponse()) };
+            var progress = new List<(int Done, int Total)>();
+
+            var results = _service.MoveComponents(fake, new[] { table, form }, "Source", "Target", false,
+                (done, total) => progress.Add((done, total)), null, out var cancelled);
+
+            Assert.False(cancelled);
+            var batches = fake.ExecutedRequests.OfType<ExecuteMultipleRequest>().ToList();
+            Assert.Equal(2, batches.Count);
+            Assert.All(batches[0].Requests.Cast<AddSolutionComponentRequest>(), r => Assert.Equal("Target", r.SolutionUniqueName));
+            Assert.All(batches[1].Requests.Cast<RemoveSolutionComponentRequest>(), r => Assert.Equal("Source", r.SolutionUniqueName));
+            Assert.All(results, r => Assert.Equal(CopyOutcome.Success, r.Outcome));
+            Assert.All(results, r => Assert.Equal("Moved.", r.Message));
+            Assert.Equal(new[] { (2, 4), (4, 4) }, progress);
+        }
+
+        [Fact]
+        public void MoveLeavesInTheSourceWhatCouldNotBeCopied()
+        {
+            var good = Item(60, "good");
+            var bad = Item(60, "bad");
+            var fake = new FakeOrganizationService
+            {
+                OnExecute = MultiAware(r =>
+                {
+                    if (r is AddSolutionComponentRequest add && add.ComponentId == bad.ObjectId)
+                    {
+                        throw new InvalidOperationException("Missing dependency.");
+                    }
+
+                    return new OrganizationResponse();
+                })
+            };
+
+            var results = _service.MoveComponents(fake, new[] { good, bad }, "Source", "Target", false, null, null, out _);
+
+            var removed = fake.ExecutedRequests.OfType<ExecuteMultipleRequest>().Last().Requests.Cast<RemoveSolutionComponentRequest>().ToList();
+            Assert.Equal(good.ObjectId, Assert.Single(removed).ComponentId);
+            Assert.Equal(CopyOutcome.Success, results.Single(r => r.Component == good).Outcome);
+            var failed = results.Single(r => r.Component == bad);
+            Assert.Equal(CopyOutcome.Failed, failed.Outcome);
+            Assert.Equal("Not copied, so it was left in the source: Missing dependency.", failed.Message);
+        }
+
+        [Fact]
+        public void MoveReportsAComponentThatWasCopiedButCouldNotBeRemoved()
+        {
+            var stuck = Item(60, "stuck");
+            var fake = new FakeOrganizationService
+            {
+                OnExecute = MultiAware(r =>
+                {
+                    if (r is RemoveSolutionComponentRequest)
+                    {
+                        throw new InvalidOperationException("Still required.");
+                    }
+
+                    return new OrganizationResponse();
+                })
+            };
+
+            var result = Assert.Single(_service.MoveComponents(fake, new[] { stuck }, "Source", "Target", false, null, null, out _));
+
+            Assert.Equal(CopyOutcome.Failed, result.Outcome);
+            Assert.Equal("Copied to the target, but not removed from the source: Still required.", result.Message);
+        }
+
+        [Fact]
+        public void MoveCancelledDuringTheCopyRemovesNothing()
+        {
+            var components = Enumerable.Range(0, 45).Select(i => Item(26)).ToList();
+            var fake = new FakeOrganizationService { OnExecute = MultiAware(r => new OrganizationResponse()) };
+            var reported = 0;
+
+            var results = _service.MoveComponents(fake, components, "Source", "Target", false, (d, t) => reported++, () => reported >= 1, out var cancelled);
+
+            Assert.True(cancelled);
+            Assert.Equal(20, results.Count);
+            Assert.All(results, r => Assert.Equal(CopyOutcome.Failed, r.Outcome));
+            Assert.DoesNotContain(fake.ExecutedRequests.OfType<ExecuteMultipleRequest>().SelectMany(m => m.Requests), r => r is RemoveSolutionComponentRequest);
+        }
+
+        // ---- add back after a removal --------------------------------------------------------------------
+
+        [Fact]
+        public void AddingBackPutsTablesFirstAndRestoresHowEachTableWasInTheSolution()
+        {
+            var form = Item(60, "Main form");
+            var complete = Item(ComponentTypeCatalog.Entity, "account");
+            complete.RootComponentBehavior = 0;
+            var partial = Item(ComponentTypeCatalog.Entity, "contact");
+            partial.RootComponentBehavior = 1;
+            var fake = new FakeOrganizationService { OnExecute = MultiAware(r => new OrganizationResponse()) };
+
+            var results = _service.RestoreComponents(fake, new[] { form, complete, partial }, "Source", null, null, out _);
+
+            var sent = fake.ExecutedRequests.OfType<ExecuteMultipleRequest>().Single().Requests.Cast<AddSolutionComponentRequest>().ToList();
+            Assert.Equal(new[] { complete.ObjectId, partial.ObjectId, form.ObjectId }, sent.Select(r => r.ComponentId));
+            Assert.All(sent, r => Assert.Equal("Source", r.SolutionUniqueName));
+            Assert.All(sent, r => Assert.False(r.AddRequiredComponents));
+            Assert.False(sent[0].DoNotIncludeSubcomponents);
+            Assert.True(sent[1].DoNotIncludeSubcomponents);
+            Assert.All(results, r => Assert.Equal("Added back to the solution.", r.Message));
+        }
+
+        // ---- where a component is used, missing dependencies, the connected user ---------------------------
+
+        [Fact]
+        public void FindsTheVisibleSolutionsThatContainAComponent()
+        {
+            var view = Item(26, "Active accounts");
+            var solution = new Entity("solution", Guid.NewGuid())
+            {
+                ["friendlyname"] = "Sales",
+                ["uniquename"] = "Sales",
+                ["ismanaged"] = true,
+                ["version"] = "1.2.0.0"
+            };
+            var fake = new FakeOrganizationService { OnRetrieveMultiple = q => new EntityCollection(new List<Entity> { solution }) };
+
+            var found = Assert.Single(_service.GetSolutionsContaining(fake, view));
+
+            Assert.Equal("Sales", found.UniqueName);
+            Assert.True(found.IsManaged);
+            var query = (QueryExpression)fake.Queries.Single();
+            Assert.Equal("solution", query.EntityName);
+            var link = query.LinkEntities.Single();
+            Assert.Equal("solutioncomponent", link.LinkToEntityName);
+            Assert.Contains(link.LinkCriteria.Conditions, c => c.AttributeName == "objectid" && (Guid)c.Values[0] == view.ObjectId);
+            Assert.Contains(link.LinkCriteria.Conditions, c => c.AttributeName == "componenttype" && (int)c.Values[0] == 26);
+            Assert.Contains(query.Criteria.Conditions, c => c.AttributeName == "isvisible");
+        }
+
+        [Fact]
+        public void MissingDependenciesAreListedOnceWithTheirNames()
+        {
+            var script = Guid.NewGuid();
+            var fake = new FakeOrganizationService
+            {
+                OnExecute = r =>
+                {
+                    if (r is RetrieveMissingDependenciesRequest missing)
+                    {
+                        Assert.Equal("Target", missing.SolutionUniqueName);
+                        var dependencies = new EntityCollection();
+                        for (var i = 0; i < 2; i++)
+                        {
+                            var dependency = new Entity("dependency", Guid.NewGuid());
+                            dependency["requiredcomponentobjectid"] = script;
+                            dependency["requiredcomponenttype"] = new OptionSetValue(61);
+                            dependencies.Entities.Add(dependency);
+                        }
+
+                        return new RetrieveMissingDependenciesResponse { Results = new ParameterCollection { { "EntityCollection", dependencies } } };
+                    }
+
+                    return NoTables();
+                },
+                OnRetrieveMultiple = q =>
+                {
+                    var collection = new EntityCollection();
+                    if (((QueryExpression)q).EntityName == "webresource")
+                    {
+                        collection.Entities.Add(new Entity("webresource", script) { ["name"] = "new_account.js", ["webresourcetype"] = new OptionSetValue(3) });
+                    }
+
+                    return collection;
+                }
+            };
+
+            var result = _service.GetMissingDependencies(fake, "Target");
+
+            var item = Assert.Single(result.Items);
+            Assert.Equal(script, item.ObjectId);
+            Assert.Equal("new_account.js", item.DisplayName);
+        }
+
+        [Fact]
+        public void NothingIsMissingWhenDataverseReturnsNoDependencies()
+        {
+            var fake = new FakeOrganizationService();
+
+            Assert.Empty(_service.GetMissingDependencies(fake, "Target").Items);
+        }
+
+        [Fact]
+        public void ResolvesNamesForComponentsKnownOnlyByTypeAndId()
+        {
+            var script = Guid.NewGuid();
+            var fake = new FakeOrganizationService
+            {
+                OnRetrieveMultiple = q => new EntityCollection(new List<Entity>
+                {
+                    new Entity("webresource", script) { ["name"] = "only_in_target.js", ["webresourcetype"] = new OptionSetValue(3) }
+                })
+            };
+
+            var item = Assert.Single(_service.GetComponents(fake, new[] { (61, script) }).Items);
+
+            Assert.Equal("only_in_target.js", item.DisplayName);
+            Assert.Equal(61, item.ComponentType);
+        }
+
+        [Fact]
+        public void ReadsTheConnectedUsersFullName()
+        {
+            var userId = Guid.NewGuid();
+            var fake = new FakeOrganizationService
+            {
+                OnExecute = r => new WhoAmIResponse { Results = new ParameterCollection { { "UserId", userId } } },
+                OnRetrieveMultiple = q => new EntityCollection(new List<Entity> { new Entity("systemuser", userId) { ["fullname"] = "Sam Doe" } })
+            };
+
+            Assert.Equal("Sam Doe", _service.GetCurrentUserName(fake));
+            var query = (QueryExpression)fake.Queries.Single();
+            Assert.Equal("systemuser", query.EntityName);
+            Assert.Equal(userId, (Guid)query.Criteria.Conditions.Single().Values[0]);
+        }
+
         // ---- target membership, publish, create ---------------------------------------------------------
 
         [Fact]

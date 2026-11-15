@@ -3,6 +3,15 @@ using SolutionComponentCloner.Models;
 
 namespace SolutionComponentCloner.Services
 {
+    /// <summary>Which components to list, by where they are: the source solution, the target solution, or both.</summary>
+    internal enum MembershipFilter
+    {
+        All,
+        NotInTarget,
+        InBoth,
+        OnlyInTarget
+    }
+
     internal static class ComponentFilter
     {
         /// <summary>
@@ -28,6 +37,30 @@ namespace SolutionComponentCloner.Services
             }
 
             return true;
+        }
+
+        /// <summary>
+        /// True when the component passes the filter chips: where it is, how recently it changed and who changed it.
+        /// A component with no modified date or modified-by never passes a filter on that field.
+        /// </summary>
+        public static bool MatchesView(SolutionComponentItem item, MembershipFilter membership, DateTime? modifiedSince, string modifiedBy)
+        {
+            if (membership == MembershipFilter.NotInTarget && item.InTarget)
+            {
+                return false;
+            }
+
+            if (membership == MembershipFilter.InBoth && !item.InTarget)
+            {
+                return false;
+            }
+
+            if (modifiedSince.HasValue && !(item.ModifiedOn >= modifiedSince.Value))
+            {
+                return false;
+            }
+
+            return string.IsNullOrEmpty(modifiedBy) || string.Equals(item.ModifiedBy, modifiedBy, StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool Contains(string haystack, string needle)

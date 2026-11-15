@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Renders the real plugin control with sample data and saves PNGs, so the layout can be checked and the
+    README screenshots regenerated without a Dataverse connection:
+
+      dotnet build tools/ScreenshotHarness/ScreenshotHarness.csproj
+      tools/ScreenshotHarness/bin/Debug/net48/ScreenshotHarness.exe <output folder> [readme]
+  -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Drawing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="XrmToolBoxPackage" Version="1.2025.10.74" />
+    <PackageReference Include="MscrmTools.Xrm.Connection" Version="1.2025.9.64" />
+    <ProjectReference Include="..\..\SolutionComponentCloner\SolutionComponentCloner.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -12,10 +12,12 @@ solution into another, browsing the source solution the way the Power Apps solut
   split into Code, Data and Images. Folders show counts, such as "Web resources (19)".
 - **Select exactly what you need** – every folder has a tri-state checkbox, so one click selects everything
   inside it. Large solutions open collapsed so every type fits on one screen.
-- **Search, sort and filter** – a search box narrows the tree as you type (Ctrl+F), the Modified, Modified by
-  and State columns are sortable, and *Select modified since...* ticks everything changed after a date.
-- **See what the target already has** – components already in the target solution are marked, can be hidden,
-  and are counted in the footer, so you don't copy things twice.
+- **Search, sort and filter** – a search box narrows the tree as you type (Ctrl+F), and the Modified, Modified by
+  and State columns are sortable. Filter chips keep only what changed in the *Last 7 days* or was *Modified by
+  me*, and *Modified since* ticks everything changed after a date, by anyone or by one person.
+- **Compare with the target** – components already in the target solution are marked and counted in the
+  footer. The *Not in target*, *In both* and *Only in target* chips show each side of the comparison, and
+  *Export comparison* saves it to CSV.
 - **Include required components** – optionally add each component's dependencies too, or copy only what you
   ticked. *Preview* lists exactly which dependencies would come along, and each table can override the setting
   from its right-click menu (include all subcomponents, or only the ones you ticked).
@@ -24,14 +26,18 @@ solution into another, browsing the source solution the way the Power Apps solut
 - **Heads-up on big components** – a table that is in the solution completely, with all its subcomponents, gets
   a yellow note. Before copying, you are asked to confirm any model-driven apps (which also pull in the tables,
   flows and site map they use when *Include required* is on) and any such tables, with what will be copied for each.
-- **Clear results** – a banner summarises how many components were copied or failed, with a per-component
-  list one click away. Failures can be exported to CSV.
+- **Clear results** – a banner summarises how many components were copied, moved, removed or failed, with a
+  per-component list one click away. All results, or only the failures, can be exported to CSV.
 - **Everything around the copy** – *Publish all* customizations afterwards, and *New solution* to create the
   target without leaving the tool. Solutions are listed newest first, with their creation date, and the tool
-  remembers your *Include required* and *Hide components already in target* settings.
-- **Swap and remove** – the swap button between the two solutions exchanges source and target in one click.
-  *Remove* takes the ticked components out of an unmanaged source solution after a confirmation; they are not
-  deleted and stay in the environment and in other solutions.
+  remembers your *Include required* and *Not in target* settings.
+- **Swap, move and remove** – the swap button between the two solutions exchanges source and target in one
+  click. *Move* copies the ticked components to the target and then removes from the source the ones that were
+  copied. *Remove* takes them out of an unmanaged source solution after a confirmation; they are not deleted
+  and stay in the environment and in other solutions, and *Add back* undoes it.
+- **Check the target** – *Check target* lists the components the target solution depends on but does not
+  contain, and adds the ones you tick, so the solution imports cleanly elsewhere.
+- **Which solutions contain this?** – right-click any component to list every solution that contains it.
 - **Readable names everywhere** – including custom and ISV component types, which are resolved through
   `solutioncomponentdefinition`. Solutions and components with thousands of rows are loaded in full.
 
